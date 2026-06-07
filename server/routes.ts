@@ -2,7 +2,7 @@ import type { Express, NextFunction, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import puppeteer from "puppeteer-core";
 import { z } from "zod";
-import { storage } from "./storage";
+import { storage, consumeInitialAdminPassword } from "./storage";
 import {
   changePasswordSchema,
   insertMemberSchema,
@@ -102,7 +102,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // One-time initial credentials reveal
   app.get("/api/initial-credentials", (_req, res) => {
-    const { consumeInitialAdminPassword } = require("./storage");
     const password = consumeInitialAdminPassword();
     if (!password) return res.status(404).json({ message: "Not available" });
     res.json({ username: "admin", password });
