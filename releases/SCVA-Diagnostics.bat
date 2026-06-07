@@ -110,11 +110,12 @@ if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
     call :bad "Architecture" "32-bit system - SCVA requires 64-bit Windows 10 or 11"
 )
 
+:: Windows major version (ver gives "10.0.19045..." so token 4 with delim=". " is "10")
 for /f "tokens=4 delims=. " %%b in ('ver 2^>nul') do (
-    if %%b GEQ 10000 (
-        call :ok "Windows Build" "Build %%b - Windows 10 or 11 confirmed"
+    if %%b GEQ 10 (
+        call :ok "Windows Version" "Windows 10 or 11 confirmed (major version %%b)"
     ) else (
-        call :bad "Windows Build" "Build %%b - Windows 10 or 11 required"
+        call :bad "Windows Version" "Windows 10 or 11 required (detected major version: %%b)"
     )
 )
 
@@ -125,10 +126,12 @@ if !errorlevel!==0 (
     call :warn "Admin Rights" "Not running as Administrator - some checks may be inaccurate"
 )
 
+:: RAM - write to temp file (backtick syntax unreliable on some systems)
 set "MEM_MB=0"
-for /f "usebackq" %%m in (`powershell -NoProfile -Command "[Math]::Round((Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize/1024)" 2^>nul`) do (
-    if not "%%m"=="" set "MEM_MB=%%m"
-)
+powershell -NoProfile -Command "[Math]::Round((Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize/1024)" > "%TEMP%\scva_mem.tmp" 2>nul
+set /p MEM_MB= < "%TEMP%\scva_mem.tmp"
+del "%TEMP%\scva_mem.tmp" >nul 2>&1
+if "!MEM_MB!"=="" set "MEM_MB=0"
 if !MEM_MB! GEQ 4096 (
     call :ok "RAM" "!MEM_MB! MB - meets minimum of 4096 MB"
 ) else if !MEM_MB! GTR 0 (
@@ -137,10 +140,12 @@ if !MEM_MB! GEQ 4096 (
     call :warn "RAM" "Could not read RAM size"
 )
 
+:: Disk - write to temp file (backtick syntax unreliable on some systems)
 set "DISK_MB=0"
-for /f "usebackq" %%d in (`powershell -NoProfile -Command "[Math]::Round((Get-PSDrive C).Free/1MB)" 2^>nul`) do (
-    if not "%%d"=="" set "DISK_MB=%%d"
-)
+powershell -NoProfile -Command "[Math]::Round((Get-PSDrive C).Free/1MB)" > "%TEMP%\scva_disk.tmp" 2>nul
+set /p DISK_MB= < "%TEMP%\scva_disk.tmp"
+del "%TEMP%\scva_disk.tmp" >nul 2>&1
+if "!DISK_MB!"=="" set "DISK_MB=0"
 if !DISK_MB! GEQ 500 (
     call :ok "Disk Space" "!DISK_MB! MB free on C: - meets minimum of 500 MB"
 ) else if !DISK_MB! GTR 0 (
@@ -312,14 +317,15 @@ if "!DEF_RES2!"=="EXCLUDED" (
     echo     Fix: powershell -Command "Add-MpPreference -ExclusionPath '%APP_DIR%'" >> "%REPORT%"
 )
 
-powershell -NoProfile -Command "try { $t=Get-MpThreatDetection -EA Stop|?{$_.Resources -match 'SCVA'}|Select -First 3; if($t){$t|%{Write-Host('THREAT: '+($_.Resources -join ', '))}}else{Write-Host 'NONE'} } catch { Write-Host 'NONE' }" > "%TEMP%\scva_thr.tmp" 2>nul
+powershell -NoProfile -Command "try { $t=Get-MpThreatDetection -EA Stop | Where-Object { $_.Resources -match 'SCVA' } | Select-Object -First 3; if ($t) { $names = ($t | ForEach-Object { if ($_.Resources) { $_.Resources } else { 'unknown' } }) -join '; '; Write-Host ('THREAT: ' + $names) } else { Write-Host 'NONE' } } catch { Write-Host 'NONE' }" > "%TEMP%\scva_thr.tmp" 2>nul
 set /p THR_RES= < "%TEMP%\scva_thr.tmp"
 del "%TEMP%\scva_thr.tmp" >nul 2>&1
+if "!THR_RES!"=="" set "THR_RES=NONE"
 
 if "!THR_RES!"=="NONE" (
     call :ok "Defender - Threats" "No SCVA-related quarantined files found"
 ) else (
-    call :bad "Defender - Threats" "Defender quarantined SCVA files: !THR_RES!"
+    call :bad "Defender - Threats" "Defender quarantined SCVA files -- !THR_RES!"
 )
 
 powershell -NoProfile -Command "try { $c=Get-NetTCPConnection -LocalPort 43210 -EA Stop; Write-Host 'IN_USE' } catch { Write-Host 'FREE' }" > "%TEMP%\scva_port.tmp" 2>nul
@@ -583,15 +589,13 @@ if !FAIL! GTR 0 (
     echo.
     echo   [5] Make sure you are using SCVA Members v1.2.0
     echo.
-    (
-    echo.
-    echo ACTIONS REQUIRED:
-    echo   1. powershell -Command "Add-MpPreference -ExclusionPath '%DATA_DIR%'"
-    echo   2. powershell -Command "Add-MpPreference -ExclusionPath '%APP_DIR%'"
-    echo   3. icacls "%DATA_DIR%" /grant "%USERNAME%:(OI)(CI)F"
-    echo   4. del "%DB_TMP%"
-    echo   5. Confirm version is SCVA Members v1.2.0
-    ) >> "%REPORT%"
+    echo. >> "%REPORT%"
+    echo ACTIONS REQUIRED: >> "%REPORT%"
+    echo   1. powershell -Command "Add-MpPreference -ExclusionPath '%DATA_DIR%'" >> "%REPORT%"
+    echo   2. powershell -Command "Add-MpPreference -ExclusionPath '%APP_DIR%'" >> "%REPORT%"
+    echo   3. icacls "%DATA_DIR%" /grant "%USERNAME%:(OI)(CI)F" >> "%REPORT%"
+    echo   4. del "%DB_TMP%" >> "%REPORT%"
+    echo   5. Confirm version is SCVA Members v1.2.0 >> "%REPORT%"
 )
 
 echo  ================================================================
