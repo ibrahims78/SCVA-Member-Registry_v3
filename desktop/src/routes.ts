@@ -492,6 +492,132 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err) { next(err); }
   });
 
+  // ─── Restore from JSON backup ─────────────────────────────────────────────────
+  app.post("/api/restore", requireAdmin, async (req, res, next) => {
+    try {
+      const body = req.body;
+      if (!body?.data?.members || !Array.isArray(body.data.members)) {
+        return res.status(400).json({ message: t(req, "restoreInvalidFormat") });
+      }
+
+      const backupMembers: any[] = body.data.members;
+      const backupSubs: any[] = Array.isArray(body.data.subscriptions) ? body.data.subscriptions : [];
+
+      // Load existing members for duplicate detection
+      const existing = await storage.getMembers();
+      const existingByName = new Map<string, typeof existing[0]>();
+      for (const m of existing) {
+        const key = `${(m.firstName || "").trim()}_${(m.lastName || "").trim()}`.toLowerCase();
+        existingByName.set(key, m);
+      }
+
+      const results = { membersAdded: 0, membersSkipped: 0, subsAdded: 0, errors: [] as string[] };
+      // Map from backup member id -> actual db id (for linking subscriptions)
+      const idMap = new Map<string, string>();
+
+      // Map existing members' backup IDs if they match by name
+      for (const m of existing) {
+        const key = `${(m.firstName || "").trim()}_${(m.lastName || "").trim()}`.toLowerCase();
+        existingByName.set(key, m);
+      }
+
+      for (const bm of backupMembers) {
+        const fn = bm.firstName || bm.first_name || "";
+        const ln = bm.lastName || bm.last_name || "";
+        const parsed = insertMemberSchema.safeParse(normalizeMemberRow({
+          firstName: fn,
+          lastName: ln,
+          fullName: bm.fullName || bm.full_name,
+          fatherName: bm.fatherName || bm.father_name,
+          englishName: bm.englishName || bm.english_name,
+          birthDate: bm.birthDate || bm.birth_date,
+          gender: bm.gender,
+          specialty: bm.specialty,
+          email: bm.email,
+          phone: bm.phone,
+          workAddress: bm.workAddress || bm.work_address,
+          city: bm.city,
+          joinDate: bm.joinDate || bm.join_date,
+          membershipType: bm.membershipType || bm.membership_type,
+          escId: bm.escId || bm.esc_id,
+        }));
+
+        if (!parsed.success) {
+          results.errors.push(`${fn} ${ln}: بيانات غير صالحة`);
+          continue;
+        }
+
+        const nameKey = `${(fn).trim()}_${(ln).trim()}`.toLowerCase();
+        const existingMember = existingByName.get(nameKey);
+
+        if (existingMember) {
+          // Member already exists — map old id to existing id for subscriptions
+          if (bm.id) idMap.set(bm.id, existingMember.id);
+          results.membersSkipped++;
+          continue;
+        }
+
+        try {
+          const created = await storage.createMember(parsed.data);
+          if (bm.id) idMap.set(bm.id, created.id);
+          existingByName.set(nameKey, created);
+          results.membersAdded++;
+        } catch (err: any) {
+          results.errors.push(`${fn} ${ln}: ${err?.message ?? "خطأ"}`);
+        }
+      }
+
+      // Import subscriptions — only for members we have in the idMap
+      const existingSubPairs = new Set<string>();
+      if (idMap.size > 0) {
+        const memberIds = Array.from(idMap.values());
+        const subsMap = await storage.getSubscriptionsByMemberIds(memberIds);
+        subsMap.forEach((subs, mid) => {
+          for (const s of subs) existingSubPairs.add(`${mid}:${s.year}`);
+        });
+      }
+
+      for (const bs of backupSubs) {
+        const backupMemberId = bs.memberId || bs.member_id;
+        const actualMemberId = idMap.get(backupMemberId);
+        if (!actualMemberId) continue;
+
+        const parsed = insertSubscriptionSchema.safeParse({
+          year: bs.year,
+          amount: bs.amount,
+          notes: bs.notes ?? null,
+          date: bs.date,
+        });
+        if (!parsed.success) continue;
+
+        const pairKey = `${actualMemberId}:${parsed.data.year}`;
+        if (existingSubPairs.has(pairKey)) continue; // skip duplicate
+
+        try {
+          await storage.createSubscription({ ...parsed.data, memberId: actualMemberId });
+          existingSubPairs.add(pairKey);
+          results.subsAdded++;
+        } catch { /* skip */ }
+      }
+
+      logAct(req, "backup_restored",
+        `أعضاء مُضافة: ${results.membersAdded}، تجاوزها: ${results.membersSkipped}، اشتراكات: ${results.subsAdded}`,
+        "system"
+      );
+      res.json(results);
+    } catch (err) { next(err); }
+  });
+
+  // ─── Reset all data ───────────────────────────────────────────────────────────
+  app.post("/api/reset", requireAdmin, async (req, res, next) => {
+    try {
+      // Log the reset action BEFORE clearing so we have a record
+      await logAct(req, "data_reset", "تم مسح جميع البيانات وإعادة ضبط النظام", "system");
+      await storage.resetAllData();
+      res.json({ message: t(req, "resetSuccess") });
+    } catch (err) { next(err); }
+  });
+
   // ─── PDF Export (via Electron BrowserWindow) ─────────────────────────────────
   app.get("/api/members/:id/pdf", requireAuth, async (req, res) => {
     try {

@@ -29,7 +29,6 @@ global.generateElectronPDF = async function(memberId, cookieString, lang) {
 
     const targetUrl = `http://127.0.0.1:${SERVER_PORT}/member/${memberId}?print=true&lang=${lang}`;
 
-    // Inject session cookies so the PDF renderer is authenticated
     const cookiePromises = [];
     if (cookieString) {
       const pairs = cookieString.split(';');
@@ -81,7 +80,6 @@ global.generateElectronPDF = async function(memberId, cookieString, lang) {
 
 // ─── Start Express server ─────────────────────────────────────────────────────
 function startServer() {
-  // Set the SQLite database path in the OS user-data folder
   const userDataPath = app.getPath('userData');
   process.env.SQLITE_DB_PATH = path.join(userDataPath, 'scva-members.db');
   process.env.PORT = String(SERVER_PORT);
@@ -120,17 +118,15 @@ function createWindow() {
     },
   });
 
-  // Remove the default menu bar for a cleaner app feel
   Menu.setApplicationMenu(null);
 
-  // Wait for server to be ready before loading
   const tryLoad = (attempts = 0) => {
     const http = require('http');
     const req = http.get(`http://127.0.0.1:${SERVER_PORT}/api/user`, (res) => {
       mainWindow.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
     });
     req.on('error', () => {
-      if (attempts < 30) {
+      if (attempts < 40) {
         setTimeout(() => tryLoad(attempts + 1), 300);
       } else {
         mainWindow.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
@@ -138,7 +134,7 @@ function createWindow() {
     });
     req.setTimeout(500, () => {
       req.destroy();
-      if (attempts < 30) setTimeout(() => tryLoad(attempts + 1), 300);
+      if (attempts < 40) setTimeout(() => tryLoad(attempts + 1), 300);
       else mainWindow.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
     });
   };
@@ -169,17 +165,30 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
-// Final persist before the process exits — ensures no data is lost
+// ─── Robust final persist before exit ────────────────────────────────────────
+// This runs synchronously before Electron terminates so no in-memory data is lost.
 app.on('before-quit', () => {
   try {
-    // Dynamically require the persist function if the server module was loaded
+    // The db module is already in Node's require cache because server.js imported
+    // it during startup. Re-requiring it returns the cached module with the live
+    // _sqlDb and _dbPath variables intact.
     const dbModule = require(path.join(__dirname, '../dist/server/db.js'));
     if (typeof dbModule.persist === 'function') {
-      dbModule.persist();
+      dbModule.closePersistInterval();  // stop the interval first
+      dbModule.persist();               // final synchronous flush
       console.log('[SCVA] Final database persist on quit complete.');
     }
   } catch (err) {
-    // Non-fatal — the periodic interval already covers regular saves
+    // Non-fatal — every write already called persist() individually
     console.warn('[SCVA] before-quit persist skipped:', err && err.message);
   }
+});
+
+// Also handle SIGTERM / SIGINT (e.g. task manager force-close on Windows)
+process.on('SIGTERM', () => {
+  try {
+    const dbModule = require(path.join(__dirname, '../dist/server/db.js'));
+    if (typeof dbModule.persist === 'function') dbModule.persist();
+  } catch {}
+  process.exit(0);
 });

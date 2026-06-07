@@ -45,12 +45,12 @@ export interface IStorage {
   logActivity(entry: InsertActivityLog): Promise<ActivityLog>;
   getActivityLogs(limit?: number): Promise<ActivityLog[]>;
   clearActivityLogs(): Promise<void>;
+
+  resetAllData(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
-  constructor() {
-    // initializeAdmin is called after initDatabase() from server.ts
-  }
+  constructor() {}
 
   async initializeAdmin() {
     try {
@@ -220,7 +220,8 @@ export class DatabaseStorage implements IStorage {
       details: entry.details ?? null,
       ip: entry.ip ?? null,
     }).run();
-    // Don't persist on every log to avoid performance issues; the periodic interval covers this
+    // Persist after every log entry to guarantee no data loss
+    persist();
     const [log] = getDb().select().from(activityLog).where(eq(activityLog.id, id)).all();
     return log;
   }
@@ -236,6 +237,14 @@ export class DatabaseStorage implements IStorage {
 
   async clearActivityLogs(): Promise<void> {
     getDb().delete(activityLog).run();
+    persist();
+  }
+
+  async resetAllData(): Promise<void> {
+    // Delete in dependency order (subscriptions reference members)
+    getDb().delete(activityLog).run();
+    getDb().delete(subscriptions).run();
+    getDb().delete(members).run();
     persist();
   }
 }

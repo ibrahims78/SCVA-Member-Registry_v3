@@ -13,17 +13,22 @@ let _persistInterval: ReturnType<typeof setInterval> | null = null;
 export async function initDatabase(dbPath: string): Promise<void> {
   _dbPath = dbPath;
 
-  // Ensure directory exists
   const dir = path.dirname(dbPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   // Locate the WASM binary.
-  // Try multiple candidate paths to handle both development and packaged app.
+  // Candidates ordered by priority — the asar.unpacked path must come before
+  // the asar path because --asar-unpack moves the WASM out of the archive.
+  const resourcesPath = (process as any).resourcesPath ?? "";
   const wasmCandidates = [
+    // Packaged app — WASM unpacked beside the asar (correct path)
+    path.join(resourcesPath, "app.asar.unpacked", "node_modules", "sql.js", "dist", "sql-wasm.wasm"),
+    // Development — relative to compiled output in dist/server/
     path.join(__dirname, "../../node_modules/sql.js/dist/sql-wasm.wasm"),
     path.join(__dirname, "../node_modules/sql.js/dist/sql-wasm.wasm"),
-    path.join((process as any).resourcesPath ?? "", "app.asar", "node_modules/sql.js/dist/sql-wasm.wasm"),
-    path.join((process as any).resourcesPath ?? "", "app/node_modules/sql.js/dist/sql-wasm.wasm"),
+    // Legacy candidates kept for compatibility
+    path.join(resourcesPath, "app.asar", "node_modules", "sql.js", "dist", "sql-wasm.wasm"),
+    path.join(resourcesPath, "app", "node_modules", "sql.js", "dist", "sql-wasm.wasm"),
   ];
 
   let wasmBinary: Buffer | null = null;
@@ -40,12 +45,11 @@ export async function initDatabase(dbPath: string): Promise<void> {
   }
 
   if (!wasmBinary) {
-    throw new Error("[DB] Could not locate sql-wasm.wasm in any candidate path: " + wasmCandidates.join(", "));
+    throw new Error("[DB] Could not locate sql-wasm.wasm. Searched:\n" + wasmCandidates.join("\n"));
   }
 
   const SQL = await initSqlJs({ wasmBinary });
 
-  // Load existing database or create new one
   let fileData: Buffer | null = null;
   if (fs.existsSync(dbPath)) {
     try {
@@ -60,12 +64,11 @@ export async function initDatabase(dbPath: string): Promise<void> {
 
   _sqlDb = fileData ? new SQL.Database(fileData) : new SQL.Database();
 
-  // Enable foreign keys
   _sqlDb.run("PRAGMA foreign_keys = ON;");
+  _sqlDb.run("PRAGMA journal_mode = WAL;");
 
   _db = drizzle(_sqlDb, { schema });
 
-  // Create tables if they don't exist
   _sqlDb.run(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -117,16 +120,14 @@ export async function initDatabase(dbPath: string): Promise<void> {
     );
   `);
 
-  // Persist after schema creation/migration
   persist();
   console.log("[DB] Database initialized and persisted to:", dbPath);
 
-  // Start periodic auto-save every 30 seconds as a safety net
+  // Auto-save every 15 seconds as safety net
   if (_persistInterval) clearInterval(_persistInterval);
   _persistInterval = setInterval(() => {
     persist();
-  }, 30 * 1000);
-  // Don't prevent clean exit
+  }, 15 * 1000);
   if (typeof _persistInterval.unref === "function") _persistInterval.unref();
 }
 
@@ -140,8 +141,11 @@ export function persist(): void {
   try {
     const data = _sqlDb.export();
     const buf = Buffer.from(data);
-    fs.writeFileSync(_dbPath, buf);
-    console.log(`[DB] Persisted ${buf.length} bytes to disk.`);
+    // Write to a temp file first, then rename — atomic on most OSes
+    const tmp = _dbPath + ".tmp";
+    fs.writeFileSync(tmp, buf);
+    fs.renameSync(tmp, _dbPath);
+    console.log(`[DB] Persisted ${buf.length} bytes → ${_dbPath}`);
   } catch (err) {
     console.error("[DB] Failed to persist database:", err);
   }

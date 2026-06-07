@@ -27,6 +27,7 @@ import {
   Loader2, UserPlus, Pencil, Trash2, ShieldCheck,
   FileSpreadsheet, Download, Upload, DatabaseBackup,
   CheckCircle2, AlertCircle, X, Receipt, History, Copy,
+  RotateCcw, AlertTriangle,
 } from "lucide-react";
 import { MEMBER_COLUMNS, SUBSCRIPTION_COLUMNS, buildHeaderIndex } from "@/lib/importColumns";
 import { useState, useRef } from "react";
@@ -227,7 +228,28 @@ export default function Settings() {
     // Access denied
     notAllowed:   isAr ? "غير مسموح بالدخول" : "Access denied",
     notAllowedD:  isAr ? "عذراً، صفحة الإعدادات متاحة للمدراء فقط." : "Sorry, the settings page is available to admins only.",
+    // Desktop-only
+    restoreTitle:   isAr ? "استيراد من نسخة احتياطية" : "Restore from backup",
+    restoreDesc:    isAr ? "استعادة بيانات الأعضاء والاشتراكات من ملف JSON صادر من هذا التطبيق. البيانات المستوردة تُضاف للموجودة ولا يُحذف أي شيء." : "Import members and subscriptions from a JSON backup file. Imported data is added to existing records — nothing is deleted.",
+    restoreBtn:     isAr ? "اختيار ملف النسخة الاحتياطية (.json)" : "Choose backup file (.json)",
+    restoring:      isAr ? "جارٍ الاستيراد..." : "Restoring...",
+    restoreOk:      isAr ? "تم الاستيراد" : "Import complete",
+    restoreErr:     isAr ? "خطأ في الاستيراد" : "Import failed",
+    restoreInvalid: isAr ? "الملف غير صالح. تأكد أنه ملف نسخة احتياطية من هذا النظام." : "Invalid file. Make sure it is a backup file from this system.",
+    resetTitle:     isAr ? "مسح جميع البيانات" : "Reset all data",
+    resetDesc:      isAr ? "حذف جميع الأعضاء والاشتراكات وسجل الأحداث نهائياً. حسابات المستخدمين لا تُمسح. هذا الإجراء لا يمكن التراجع عنه." : "Permanently delete all members, subscriptions, and activity logs. User accounts are kept. This cannot be undone.",
+    resetBtn:       isAr ? "مسح جميع البيانات والعودة للبداية" : "Reset all data",
+    resetting:      isAr ? "جارٍ المسح..." : "Resetting...",
+    resetOk:        isAr ? "تم مسح البيانات" : "Data cleared",
+    resetOkD:       isAr ? "تم حذف جميع البيانات بنجاح." : "All data has been cleared successfully.",
+    resetErr:       isAr ? "خطأ في المسح" : "Reset failed",
+    resetConfirm:   isAr
+      ? "⚠️ تحذير: سيتم حذف جميع الأعضاء والاشتراكات وسجل الأحداث نهائياً.\nحسابات المستخدمين ستبقى كما هي.\n\nهذا الإجراء لا يمكن التراجع عنه!\nهل أنت متأكد تماماً؟"
+      : "⚠️ Warning: All members, subscriptions, and activity logs will be permanently deleted.\nUser accounts will be kept.\n\nThis cannot be undone!\nAre you absolutely sure?",
   };
+
+  // Detect desktop (Electron) environment
+  const isDesktop = typeof (window as any).electronApp !== "undefined";
 
   // ─── State ────────────────────────────────────────────────────────────────────
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -242,8 +264,10 @@ export default function Settings() {
   const [isExportingMembers, setIsExportingMembers] = useState(false);
   const [isExportingSubs, setIsExportingSubs] = useState(false);
   const [logFilter, setLogFilter] = useState("");
+  const [isRestoring, setIsRestoring] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const subFileInputRef = useRef<HTMLInputElement>(null);
+  const restoreFileInputRef = useRef<HTMLInputElement>(null);
 
   const userFormSchema = buildUserSchema(isAr);
 
@@ -304,6 +328,21 @@ export default function Settings() {
       toast({ title: L.logCleared });
     },
     onError: onMutationError,
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/reset", {});
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/members"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/activity-log"] });
+      toast({ title: L.resetOk, description: L.resetOkD });
+    },
+    onError: (err: Error) => {
+      toast({ title: L.resetErr, description: err.message, variant: "destructive" });
+    },
   });
 
   // ─── Form ─────────────────────────────────────────────────────────────────────
@@ -495,6 +534,43 @@ export default function Settings() {
       toast({ title: L.expSubsOk, description: L.expSubsOkD });
     } catch { toast({ title: L.expSubsErr, variant: "destructive" }); }
     finally { setIsExportingSubs(false); }
+  };
+
+  // ─── Restore from backup (desktop only) ──────────────────────────────────────
+  const handleRestoreImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsRestoring(true);
+    try {
+      const text = await file.text();
+      let backup: any;
+      try { backup = JSON.parse(text); } catch {
+        toast({ title: L.restoreErr, description: L.restoreInvalid, variant: "destructive" });
+        return;
+      }
+      if (!backup?.data?.members || !Array.isArray(backup.data.members)) {
+        toast({ title: L.restoreErr, description: L.restoreInvalid, variant: "destructive" });
+        return;
+      }
+      const res = await apiRequest("POST", "/api/restore", backup);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast({ title: L.restoreErr, description: err.message ?? L.restoreInvalid, variant: "destructive" });
+        return;
+      }
+      const result = await res.json();
+      queryClient.invalidateQueries({ queryKey: ["/api/members"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/activity-log"] });
+      const desc = isAr
+        ? `أُضيف ${result.membersAdded} عضو و${result.subsAdded} اشتراك`
+        : `Added ${result.membersAdded} members and ${result.subsAdded} subscriptions`;
+      toast({ title: L.restoreOk, description: desc });
+    } catch {
+      toast({ title: L.restoreErr, variant: "destructive" });
+    } finally {
+      setIsRestoring(false);
+      if (restoreFileInputRef.current) restoreFileInputRef.current.value = "";
+    }
   };
 
   // ─── Backup ───────────────────────────────────────────────────────────────────
@@ -872,6 +948,79 @@ export default function Settings() {
               </Button>
             </CardContent>
           </Card>
+
+          {/* ── Desktop-only: Restore from backup ── */}
+          {isDesktop && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-lg bg-amber-500/10 text-amber-600 flex items-center justify-center ring-1 ring-amber-500/20">
+                    <RotateCcw className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">{L.restoreTitle}</CardTitle>
+                    <CardDescription>{L.restoreDesc}</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="relative">
+                  <Button
+                    variant="outline"
+                    onClick={() => restoreFileInputRef.current?.click()}
+                    disabled={isRestoring}
+                    className="gap-2"
+                    data-testid="button-restore-backup"
+                  >
+                    {isRestoring
+                      ? <Loader2 className="h-4 w-4 animate-spin" />
+                      : <Upload className="h-4 w-4" />}
+                    {isRestoring ? L.restoring : L.restoreBtn}
+                  </Button>
+                  <input
+                    ref={restoreFileInputRef}
+                    type="file"
+                    accept=".json"
+                    className="hidden"
+                    onChange={handleRestoreImport}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Desktop-only: Reset all data ── */}
+          {isDesktop && (
+            <Card className="border-destructive/30">
+              <CardHeader>
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center ring-1 ring-destructive/20">
+                    <AlertTriangle className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg text-destructive">{L.resetTitle}</CardTitle>
+                    <CardDescription>{L.resetDesc}</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  variant="destructive"
+                  disabled={resetMutation.isPending}
+                  className="gap-2"
+                  data-testid="button-reset-all-data"
+                  onClick={() => {
+                    if (window.confirm(L.resetConfirm)) resetMutation.mutate();
+                  }}
+                >
+                  {resetMutation.isPending
+                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                    : <Trash2 className="h-4 w-4" />}
+                  {resetMutation.isPending ? L.resetting : L.resetBtn}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* ========================= ACTIVITY LOG TAB ========================= */}
