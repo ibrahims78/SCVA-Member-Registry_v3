@@ -103,20 +103,20 @@ echo.
 for /f "tokens=*" %%v in ('ver 2^>nul') do call :log_info "Windows" "%%v"
 
 if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
-    call :ok "Architecture" "64-bit confirmed (AMD64)"
+    call :ok "Architecture" "64-bit confirmed - AMD64"
 ) else if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" (
-    call :ok "Architecture" "64-bit confirmed (WOW64)"
+    call :ok "Architecture" "64-bit confirmed - WOW64"
 ) else (
     call :bad "Architecture" "32-bit system - SCVA requires 64-bit Windows 10 or 11"
 )
 
-:: Windows major version (ver gives "10.0.19045..." so token 4 with delim=". " is "10")
-for /f "tokens=4 delims=. " %%b in ('ver 2^>nul') do (
-    if %%b GEQ 10 (
-        call :ok "Windows Version" "Windows 10 or 11 confirmed (major version %%b)"
-    ) else (
-        call :bad "Windows Version" "Windows 10 or 11 required (detected major version: %%b)"
-    )
+:: Windows major version - extract first, then check outside the for loop
+set "WIN_VER=0"
+for /f "tokens=4 delims=. " %%b in ('ver 2^>nul') do set "WIN_VER=%%b"
+if !WIN_VER! GEQ 10 (
+    call :ok "Windows Version" "Windows 10 or 11 confirmed - major version !WIN_VER!"
+) else (
+    call :bad "Windows Version" "Windows 10 or 11 required - detected major version !WIN_VER!"
 )
 
 net session >nul 2>&1
@@ -163,7 +163,7 @@ echo   Phase 2: Application Files >> "%REPORT%"
 echo.
 
 if exist "%APP_EXE%" (
-    for %%f in ("%APP_EXE%") do call :ok "App EXE" "Found SCVA Members.exe  (%%~zf bytes)"
+    for %%f in ("%APP_EXE%") do call :ok "App EXE" "Found SCVA Members.exe - %%~zf bytes"
 ) else (
     call :bad "App EXE" "SCVA Members.exe NOT found in: %APP_DIR%"
     echo.
@@ -178,7 +178,7 @@ if exist "%APP_DIR%\resources\app.asar" (
 )
 
 if exist "%WASM%" (
-    for %%f in ("%WASM%") do call :ok "WASM Binary" "sql-wasm.wasm found  (%%~zf bytes)"
+    for %%f in ("%WASM%") do call :ok "WASM Binary" "sql-wasm.wasm found - %%~zf bytes"
 ) else (
     call :bad "WASM Binary" "sql-wasm.wasm NOT found - database engine will fail to start"
     echo     Expected: %WASM%
@@ -201,7 +201,7 @@ if exist "%DATA_DIR%\" (
 
 if exist "%DB_TMP%" (
     for %%f in ("%DB_TMP%") do set TMP_BYTES=%%~zf
-    call :bad "Stuck Temp File" "scva-members.db.tmp found (!TMP_BYTES! bytes) - atomic rename was failing"
+    call :bad "Stuck Temp File" "scva-members.db.tmp found - !TMP_BYTES! bytes - atomic rename was failing"
     echo     This is proof the data-loss bug existed on this machine.
     echo     Delete it:  del "%DB_TMP%"
     echo     Delete it: del "%DB_TMP%" >> "%REPORT%"
@@ -215,7 +215,7 @@ if exist "%DB_FILE%" (
         set DB_DATE=%%~tf
     )
     if !DB_BYTES! GTR 0 (
-        call :ok "Database File" "!DB_BYTES! bytes  (modified: !DB_DATE!)"
+        call :ok "Database File" "!DB_BYTES! bytes - modified: !DB_DATE!"
     ) else (
         call :bad "Database File" "File is 0 bytes - database is empty or corrupted"
     )
@@ -255,10 +255,10 @@ if exist "%DATA_DIR%\diag-test.tmp" (
     move /Y "%DATA_DIR%\diag-test.tmp" "%DATA_DIR%\diag-test.db" >nul 2>&1
     if exist "%DATA_DIR%\diag-test.db" (
         del "%DATA_DIR%\diag-test.db" >nul 2>&1
-        call :ok "Atomic Rename" "rename() works - save mechanism is functional on this system"
+        call :ok "Atomic Rename" "rename works - save mechanism is functional on this system"
     ) else (
         del "%DATA_DIR%\diag-test.tmp" >nul 2>&1
-        call :bad "Atomic Rename" "rename() FAILED (EPERM) - this is the root cause of data loss in v1.1.0"
+        call :bad "Atomic Rename" "rename FAILED - EPERM - this is the root cause of data loss in v1.1.0"
         echo     SCVA Members v1.2.0 works around this automatically with a direct-write fallback.
         echo     Also add a Windows Defender exclusion (see Phase 5).
     )
@@ -395,7 +395,7 @@ for /f "tokens=5" %%p in ('netstat -ano 2^>nul ^| findstr "LISTENING" ^| findstr
     if "!SERVER_PID!"=="" set "SERVER_PID=%%p"
 )
 if defined SERVER_PID (
-    call :ok "Server Listening" "Express server on port 43210  (PID: !SERVER_PID!)"
+    call :ok "Server Listening" "Express server on port 43210 - PID: !SERVER_PID!"
 ) else (
     call :bad "Server Listening" "Nothing is listening on port 43210 - server failed to start"
 )
@@ -405,7 +405,7 @@ set /p SRV_RES= < "%TEMP%\scva_srv.tmp"
 del "%TEMP%\scva_srv.tmp" >nul 2>&1
 
 if "!SRV_RES!"=="HTTP_401" (
-    call :ok "HTTP Response" "HTTP 401 - server is up (401 = not logged in, that is normal)"
+    call :ok "HTTP Response" "HTTP 401 - server is up, not logged in yet - that is normal"
 ) else if "!SRV_RES!"=="HTTP_200" (
     call :ok "HTTP Response" "HTTP 200 - server is up and session is active"
 ) else if "!SRV_RES!"=="UNREACHABLE" (
@@ -434,24 +434,24 @@ if exist "%DB_FILE%" (
     echo     Size: !DB_LIVE_BYTES! bytes  Modified: !DB_LIVE_DATE! >> "%REPORT%"
 
     if !DB_LIVE_BYTES! GTR 20480 (
-        call :ok "DB Size (live)" "!DB_LIVE_BYTES! bytes - database has data"
+        call :ok "DB Size Live" "!DB_LIVE_BYTES! bytes - database has data"
     ) else if !DB_LIVE_BYTES! GTR 4096 (
-        call :warn "DB Size (live)" "!DB_LIVE_BYTES! bytes - small (add members to test)"
+        call :warn "DB Size Live" "!DB_LIVE_BYTES! bytes - small, add members to test"
     ) else if !DB_LIVE_BYTES! GTR 0 (
-        call :warn "DB Size (live)" "!DB_LIVE_BYTES! bytes - very small, may be empty schema only"
+        call :warn "DB Size Live" "!DB_LIVE_BYTES! bytes - very small, may be empty schema only"
     ) else (
-        call :bad "DB Size (live)" "0 bytes - nothing is being saved to disk"
+        call :bad "DB Size Live" "0 bytes - nothing is being saved to disk"
     )
 ) else (
-    call :bad "DB File (live)" "Database file does NOT exist while app is running"
+    call :bad "DB File Live" "Database file does NOT exist while app is running"
     echo     Expected: %DB_FILE%
 )
 
 if exist "%DB_TMP%" (
     for %%f in ("%DB_TMP%") do set TMP_LIVE=%%~zf
-    call :bad "Temp File (live)" ".tmp present while running (!TMP_LIVE! bytes) - rename is failing NOW"
+    call :bad "Temp File Live" ".tmp present while running - !TMP_LIVE! bytes - rename is failing NOW"
 ) else (
-    call :ok "Temp File (live)" "No stuck .tmp - persist is completing successfully"
+    call :ok "Temp File Live" "No stuck .tmp - persist is completing successfully"
 )
 
 ::------------------------------------------------------------------
@@ -518,7 +518,7 @@ if exist "%DB_FILE%" (
     if !DB_AFTER! GTR 20480 (
         call :ok "Data Saved" "!DB_AFTER! bytes confirmed on disk - data IS being saved correctly"
     ) else if !DB_AFTER! GTR 4096 (
-        call :warn "Data Saved" "!DB_AFTER! bytes - small (did you add a member?)"
+        call :warn "Data Saved" "!DB_AFTER! bytes - small, did you add a member?"
     ) else (
         call :bad "Data Saved" "!DB_AFTER! bytes after close - data may not have been saved"
     )
@@ -554,9 +554,9 @@ echo.
 echo FINAL REPORT >> "%REPORT%"
 
 if !FAIL! GTR 0 (
-    set "VERDICT=ACTION REQUIRED  --  !FAIL! critical failure(s) detected"
+    set "VERDICT=ACTION REQUIRED  --  !FAIL! critical failures detected"
 ) else if !WARN! GTR 0 (
-    set "VERDICT=WARNINGS FOUND   --  !WARN! warning(s) to review"
+    set "VERDICT=WARNINGS FOUND   --  !WARN! warnings to review"
 ) else (
     set "VERDICT=ALL CHECKS PASSED  --  system is ready"
 )
