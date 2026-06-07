@@ -11,7 +11,7 @@ app.setName('SCVA Members');
 // ─── Configuration ────────────────────────────────────────────────────────────
 const SERVER_PORT = 43210;
 const APP_TITLE   = 'نظام إدارة أعضاء SCVA';
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const MIN_WIDTH   = 1024;
 const MIN_HEIGHT  = 700;
 
@@ -86,14 +86,22 @@ global.generateElectronPDF = async function(memberId, cookieString, lang) {
 function startServer() {
   const userDataPath = app.getPath('userData');
   // Respect an existing SQLITE_DB_PATH (e.g. set via setx /M for shared installs).
-  // Only fall back to the per-user AppData path when no override is configured.
+  // v1.5.0: Save the database in the same folder as the .exe so all Windows
+  // users on the machine share one database, backups are trivial, and
+  // antivirus is far less likely to interfere with writes in the app folder.
+  // In dev mode (not packaged) fall back to userData to avoid polluting the
+  // Electron binary directory.
   if (!process.env.SQLITE_DB_PATH) {
-    process.env.SQLITE_DB_PATH = path.join(userDataPath, 'scva-members.db');
+    const dbDir = app.isPackaged
+      ? path.dirname(process.execPath)   // e.g. C:\SCVA Members_win\
+      : userDataPath;                    // dev: C:\Users\…\AppData\Roaming\…
+    process.env.SQLITE_DB_PATH = path.join(dbDir, 'scva-members.db');
   }
   process.env.PORT = String(SERVER_PORT);
   process.env.NODE_ENV = 'production';
 
-  console.log(`[SCVA v${APP_VERSION}] Data directory: ${userDataPath}`);
+  const dbDir = path.dirname(process.env.SQLITE_DB_PATH);
+  console.log(`[SCVA v${APP_VERSION}] Data directory: ${dbDir}`);
   console.log(`[SCVA] Database: ${process.env.SQLITE_DB_PATH}`);
 
   try {

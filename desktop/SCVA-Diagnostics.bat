@@ -15,7 +15,7 @@ chcp 65001 > nul 2>&1
 ::  READ-ONLY - does not modify any files except SCVA-Diagnostics-Report.txt
 :: ================================================================
 
-set "TOOL_VERSION=1.4.0"
+set "TOOL_VERSION=1.5.0"
 set "APP_PORT=43210"
 
 set "APP_DIR=%~dp0"
@@ -24,8 +24,9 @@ if "%APP_DIR:~-1%"=="\" set "APP_DIR=%APP_DIR:~0,-1%"
 set "APP_EXE=%APP_DIR%\SCVA Members.exe"
 set "ASAR=%APP_DIR%\resources\app.asar"
 set "WASM=%APP_DIR%\resources\app.asar.unpacked\node_modules\sql.js\dist\sql-wasm.wasm"
-set "DATA_DIR=%APPDATA%\SCVA Members"
-set "DB_FILE=%DATA_DIR%\scva-members.db"
+set "DATA_DIR=%APP_DIR%"
+:: v1.5.0: DB now lives in the app folder (same dir as the .exe)
+set "DB_FILE=%APP_DIR%\scva-members.db"
 set "DB_TMP=%DB_FILE%.tmp"
 set "REPORT=%APP_DIR%\SCVA-Diagnostics-Report.txt"
 
@@ -166,7 +167,7 @@ if exist "%WASM%" (
 ) else (
   call :fail "WASM Binary" "sql-wasm.wasm NOT FOUND - database engine cannot start"
   echo.
-  echo    SOLUTION: Re-download SCVA Members v1.4.0
+  echo    SOLUTION: Re-download SCVA Members v1.5.0
   echo    Expected: %WASM%
   echo.
 )
@@ -319,7 +320,7 @@ if exist "%DB_FILE%" (
   echo    SOLUTIONS:
   echo    1. Antivirus blocking AppData writes - add app folder to exclusions
   echo    2. Check Windows Defender Controlled Folder Access settings
-  echo    3. Re-download SCVA Members v1.4.0 (includes all latest fixes)
+  echo    3. Re-download SCVA Members v1.5.0 (includes all latest fixes)
   echo.
 )
 
