@@ -51,10 +51,29 @@ export async function initDatabase(dbPath: string): Promise<void> {
   const SQL = await initSqlJs({ wasmBinary });
 
   let fileData: Buffer | null = null;
-  if (fs.existsSync(dbPath)) {
+  const tmpPath = dbPath + ".tmp";
+
+  // Recovery: if a .tmp file exists from a previously-interrupted save,
+  // use whichever file is larger (more data). This guards against the case
+  // where antivirus blocked the final rename but the .tmp contains the latest data.
+  let dbSize  = 0;
+  let tmpSize = 0;
+  try { dbSize  = fs.existsSync(dbPath)  ? fs.statSync(dbPath).size  : 0; } catch {}
+  try { tmpSize = fs.existsSync(tmpPath) ? fs.statSync(tmpPath).size : 0; } catch {}
+
+  const useTmp = tmpSize > dbSize && tmpSize > 4096;
+  const readPath = useTmp ? tmpPath : dbPath;
+
+  if (fs.existsSync(readPath)) {
     try {
-      fileData = fs.readFileSync(dbPath);
-      console.log("[DB] Loaded existing database from:", dbPath, `(${fileData.length} bytes)`);
+      fileData = fs.readFileSync(readPath);
+      if (useTmp) {
+        console.warn("[DB] Recovered from .tmp file (antivirus may have blocked the final rename). Bytes:", fileData.length);
+        // Promote the .tmp to the real db file now that we can
+        try { fs.copyFileSync(tmpPath, dbPath); fs.unlinkSync(tmpPath); } catch {}
+      } else {
+        console.log("[DB] Loaded existing database from:", readPath, `(${fileData.length} bytes)`);
+      }
     } catch (err) {
       console.error("[DB] Failed to read existing database, starting fresh:", err);
     }

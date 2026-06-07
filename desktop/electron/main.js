@@ -103,6 +103,44 @@ function startServer() {
   }
 }
 
+// ─── Loading page shown while the server warms up ────────────────────────────
+const LOADING_HTML = `data:text/html;charset=utf-8,<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100vh;
+    background: #0f172a;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #94a3b8;
+  }
+  .logo { font-size: 3rem; margin-bottom: 1rem; }
+  h1 { color: #e2e8f0; font-size: 1.4rem; margin-bottom: 0.4rem; }
+  p  { font-size: 0.9rem; margin-bottom: 2rem; }
+  .spinner {
+    width: 40px; height: 40px;
+    border: 4px solid #1e3a5f;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .hint { margin-top: 1.5rem; font-size: 0.78rem; color: #475569; max-width: 340px; text-align: center; line-height: 1.6; }
+</style>
+</head>
+<body>
+  <div class="logo">🫀</div>
+  <h1>نظام إدارة أعضاء SCVA</h1>
+  <p>جارٍ تشغيل الخادم...</p>
+  <div class="spinner"></div>
+  <div class="hint">إذا استغرق التحميل أكثر من 30 ثانية، قد يكون برنامج الحماية يُبطئ الاتصال. أضف مجلد البرنامج كاستثناء في الـ Antivirus.</div>
+</body>
+</html>`;
+
 // ─── Create the main window ───────────────────────────────────────────────────
 function createWindow() {
   const { screen } = require('electron');
@@ -128,22 +166,33 @@ function createWindow() {
 
   Menu.setApplicationMenu(null);
 
+  // Show loading page immediately so the window isn't blank
+  mainWindow.loadURL(LOADING_HTML);
+
+  // Poll until the local server responds, then switch to the real app.
+  // MAX_ATTEMPTS × INTERVAL_MS = 30 s — generous enough for slow AV scans.
+  const MAX_ATTEMPTS = 100;
+  const INTERVAL_MS  = 300;
+
   const tryLoad = (attempts = 0) => {
+    if (!mainWindow) return;
     const http = require('http');
-    const req = http.get(`http://127.0.0.1:${SERVER_PORT}/api/user`, (res) => {
-      mainWindow.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
+    const req = http.get(`http://127.0.0.1:${SERVER_PORT}/api/user`, () => {
+      // Server responded — load the real app
+      if (mainWindow) mainWindow.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
     });
     req.on('error', () => {
-      if (attempts < 40) {
-        setTimeout(() => tryLoad(attempts + 1), 300);
+      if (attempts < MAX_ATTEMPTS) {
+        setTimeout(() => tryLoad(attempts + 1), INTERVAL_MS);
       } else {
-        mainWindow.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
+        // Timed out — load anyway; React will show login or an error message
+        if (mainWindow) mainWindow.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
       }
     });
-    req.setTimeout(500, () => {
+    req.setTimeout(800, () => {
       req.destroy();
-      if (attempts < 40) setTimeout(() => tryLoad(attempts + 1), 300);
-      else mainWindow.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
+      if (attempts < MAX_ATTEMPTS) setTimeout(() => tryLoad(attempts + 1), INTERVAL_MS);
+      else if (mainWindow) mainWindow.loadURL(`http://127.0.0.1:${SERVER_PORT}`);
     });
   };
 
