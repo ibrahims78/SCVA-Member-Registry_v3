@@ -1,0 +1,154 @@
+import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { randomUUID } from "crypto";
+import { z } from "zod";
+
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+  role: text("role").notNull().default("employee"),
+  mustChangePassword: integer("must_change_password", { mode: "boolean" }).notNull().default(false),
+});
+
+export const members = sqliteTable("members", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  fullName: text("full_name"),
+  fatherName: text("father_name"),
+  englishName: text("english_name"),
+  birthDate: text("birth_date"),
+  gender: text("gender"),
+  specialty: text("specialty"),
+  email: text("email"),
+  phone: text("phone"),
+  workAddress: text("work_address"),
+  city: text("city"),
+  joinDate: text("join_date"),
+  membershipType: text("membership_type"),
+  escId: text("esc_id"),
+  membershipNumber: integer("membership_number"),
+});
+
+export const subscriptions = sqliteTable("subscriptions", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  memberId: text("member_id").references(() => members.id).notNull(),
+  year: integer("year").notNull(),
+  amount: integer("amount").notNull(),
+  notes: text("notes"),
+  date: text("date").notNull(),
+});
+
+export const activityLog = sqliteTable("activity_log", {
+  id: text("id").primaryKey().$defaultFn(() => randomUUID()),
+  timestamp: text("timestamp").notNull(),
+  userId: text("user_id"),
+  username: text("username").notNull(),
+  action: text("action").notNull(),
+  entityType: text("entity_type"),
+  entityId: text("entity_id"),
+  details: text("details"),
+  ip: text("ip"),
+});
+
+export const genderEnum = z.enum(["male", "female"]);
+export const membershipTypeEnum = z.enum(["original", "associate"]);
+
+export const insertUserSchema = z.object({
+  username: z.string().min(3, "اسم المستخدم يجب أن يحتوي 3 أحرف على الأقل"),
+  password: z.string().min(8, "كلمة المرور يجب أن تحتوي 8 أحرف على الأقل"),
+  role: z.enum(["admin", "employee"]).optional(),
+});
+
+export const updateUserSchema = z
+  .object({
+    username: z.string().min(3).optional(),
+    password: z.string().min(8).optional(),
+    role: z.enum(["admin", "employee"]).optional(),
+    mustChangePassword: z.boolean().optional(),
+  })
+  .strict();
+
+export const changePasswordSchema = z.object({
+  newPassword: z.string().min(8, "كلمة المرور الجديدة يجب أن تحتوي على 8 أحرف على الأقل"),
+  confirmPassword: z.string().min(1, "تأكيد كلمة المرور مطلوب"),
+}).refine((d) => d.newPassword === d.confirmPassword, {
+  message: "كلمتا المرور غير متطابقتين",
+  path: ["confirmPassword"],
+});
+
+export const insertMemberSchema = z.object({
+  firstName: z.string().min(1, "الاسم الأول مطلوب"),
+  lastName: z.string().min(1, "الكنية مطلوبة"),
+  fullName: z.string().optional().nullable(),
+  fatherName: z.string().optional().nullable(),
+  englishName: z.string().optional().nullable(),
+  birthDate: z.string().optional().nullable(),
+  gender: genderEnum.optional().nullable(),
+  specialty: z.string().optional().nullable(),
+  email: z.string().email("بريد إلكتروني غير صالح").optional().or(z.literal("")).nullable(),
+  phone: z.string().optional().nullable(),
+  workAddress: z.string().optional().nullable(),
+  city: z.string().optional().nullable(),
+  joinDate: z.string().optional().nullable(),
+  membershipType: membershipTypeEnum.optional().nullable(),
+  escId: z.string().optional().nullable(),
+});
+
+export const updateMemberSchema = insertMemberSchema.partial();
+
+export const insertSubscriptionSchema = z.object({
+  year: z.coerce.number().int().min(1900).max(3000),
+  amount: z.coerce.number().int().nonnegative(),
+  notes: z.string().optional().nullable(),
+  date: z.string().min(1, "التاريخ مطلوب"),
+});
+
+export const insertActivityLogSchema = z.object({
+  timestamp: z.string(),
+  userId: z.string().nullable().optional(),
+  username: z.string(),
+  action: z.string(),
+  entityType: z.string().nullable().optional(),
+  entityId: z.string().nullable().optional(),
+  details: z.string().nullable().optional(),
+  ip: z.string().nullable().optional(),
+});
+
+export const loginSchema = z.object({
+  username: z.string().min(1, "اسم المستخدم مطلوب"),
+  password: z.string().min(1, "كلمة المرور مطلوبة"),
+});
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type UpdateUser = z.infer<typeof updateUserSchema>;
+export type Member = typeof members.$inferSelect;
+export type InsertMember = z.infer<typeof insertMemberSchema>;
+export type UpdateMember = z.infer<typeof updateMemberSchema>;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
+export type ActivityLog = typeof activityLog.$inferSelect;
+export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
+
+export type Gender = z.infer<typeof genderEnum>;
+export type MembershipType = z.infer<typeof membershipTypeEnum>;
+
+export type MemberWithSubscriptions = Member & {
+  subscriptions: Subscription[];
+};
+
+export const SPECIALTIES = [
+  { value: "cardiac_surgery", labelAr: "جراحة قلب", labelEn: "Cardiac Surgery" },
+  { value: "cardiology", labelAr: "قلبية داخلية", labelEn: "Cardiology" },
+] as const;
+
+export const GENDERS = [
+  { value: "male", labelAr: "ذكر", labelEn: "Male" },
+  { value: "female", labelAr: "أنثى", labelEn: "Female" },
+] as const;
+
+export const MEMBERSHIP_TYPES = [
+  { value: "original", labelAr: "أصيل", labelEn: "Original" },
+  { value: "associate", labelAr: "مشارك", labelEn: "Associate" },
+] as const;

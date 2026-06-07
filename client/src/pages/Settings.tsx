@@ -1,0 +1,1026 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Tabs, TabsContent, TabsList, TabsTrigger,
+} from "@/components/ui/tabs";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { insertUserSchema, type User, type ActivityLog } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
+import { useLanguage } from "@/context/LanguageContext";
+import {
+  Loader2, UserPlus, Pencil, Trash2, ShieldCheck,
+  FileSpreadsheet, Download, Upload, DatabaseBackup,
+  CheckCircle2, AlertCircle, X, Receipt, History, Copy,
+} from "lucide-react";
+import { MEMBER_COLUMNS, SUBSCRIPTION_COLUMNS, buildHeaderIndex } from "@/lib/importColumns";
+import { useState, useRef } from "react";
+import { z } from "zod";
+import * as XLSX from "xlsx";
+import { cn } from "@/lib/utils";
+
+function buildUserSchema(isAr: boolean) {
+  return insertUserSchema.extend({
+    password: z
+      .string()
+      .min(8, isAr ? "كلمة المرور يجب أن تكون 8 أحرف على الأقل" : "Password must be at least 8 characters")
+      .optional()
+      .or(z.literal("")),
+    role: z.enum(["admin", "employee"]),
+  });
+}
+type UserFormValues = z.infer<ReturnType<typeof buildUserSchema>>;
+
+const IMPORT_COLUMNS = MEMBER_COLUMNS;
+const SUB_IMPORT_COLUMNS = SUBSCRIPTION_COLUMNS;
+
+interface ImportResult {
+  success: number;
+  failed: number;
+  skipped?: number;
+  updated?: number;
+  errors: string[];
+}
+
+// ─── Action label map ──────────────────────────────────────────────────────────
+const ACTION_LABELS: Record<string, { ar: string; en: string; color: string }> = {
+  login:                  { ar: "تسجيل دخول",              en: "Login",                  color: "text-emerald-600" },
+  logout:                 { ar: "تسجيل خروج",              en: "Logout",                 color: "text-slate-500" },
+  member_created:         { ar: "إضافة عضو",               en: "Member added",            color: "text-blue-600" },
+  member_updated:         { ar: "تعديل عضو",               en: "Member updated",          color: "text-amber-600" },
+  member_deleted:         { ar: "حذف عضو",                 en: "Member deleted",          color: "text-destructive" },
+  members_imported:       { ar: "استيراد أعضاء",           en: "Members imported",        color: "text-purple-600" },
+  subscription_created:   { ar: "إضافة اشتراك",            en: "Subscription added",      color: "text-blue-600" },
+  subscription_updated:   { ar: "تعديل اشتراك",            en: "Subscription updated",    color: "text-amber-600" },
+  subscription_deleted:   { ar: "حذف اشتراك",              en: "Subscription deleted",    color: "text-destructive" },
+  subscriptions_imported: { ar: "استيراد اشتراكات",        en: "Subscriptions imported",  color: "text-purple-600" },
+  subscriptions_exported: { ar: "تصدير الاشتراكات",        en: "Subscriptions exported",  color: "text-teal-600" },
+  user_created:           { ar: "إضافة مستخدم",            en: "User added",              color: "text-blue-600" },
+  user_updated:           { ar: "تعديل مستخدم",            en: "User updated",            color: "text-amber-600" },
+  user_deleted:           { ar: "حذف مستخدم",              en: "User deleted",            color: "text-destructive" },
+  password_changed:       { ar: "تغيير كلمة المرور",       en: "Password changed",        color: "text-slate-600" },
+  backup_exported:        { ar: "تصدير نسخة احتياطية",     en: "Backup exported",         color: "text-teal-600" },
+  pdf_exported:           { ar: "تصدير PDF",               en: "PDF exported",            color: "text-teal-600" },
+  activity_log_cleared:   { ar: "مسح سجل الأحداث",        en: "Activity log cleared",    color: "text-destructive" },
+};
+
+function getActionLabel(action: string) {
+  return ACTION_LABELS[action] ?? { ar: action, en: action, color: "text-muted-foreground" };
+}
+
+function formatTimestamp(ts: string): string {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleString("en-GB", {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false,
+    });
+  } catch {
+    return ts;
+  }
+}
+
+export default function Settings() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const { language } = useLanguage();
+  const isAr = language === "ar";
+
+  const L = {
+    title:        isAr ? "إعدادات النظام" : "System settings",
+    subtitle:     isAr ? "إدارة المستخدمين، استيراد البيانات، والنسخ الاحتياطي." : "Manage users, import data, and backups.",
+    success:      isAr ? "تم النجاح" : "Success",
+    error:        isAr ? "خطأ" : "Error",
+    tabUsers:     isAr ? "المستخدمون" : "Users",
+    tabData:      isAr ? "البيانات" : "Data",
+    tabLog:       isAr ? "سجل الأحداث" : "Activity Log",
+    // Users
+    usersTitle:   isAr ? "إدارة المستخدمين" : "User management",
+    usersDesc:    isAr ? "إضافة وتعديل وحذف حسابات النظام." : "Add, edit, or remove system accounts.",
+    addUser:      isAr ? "إضافة مستخدم" : "Add user",
+    username:     isAr ? "اسم المستخدم" : "Username",
+    role:         isAr ? "الدور" : "Role",
+    actions:      isAr ? "الإجراءات" : "Actions",
+    admin:        isAr ? "مدير" : "Admin",
+    employee:     isAr ? "موظف" : "Employee",
+    cantDelSelf:  isAr ? "لا يمكنك حذف حسابك الخاصّ" : "You cannot delete your own account",
+    cantDelLast:  isAr ? "لا يمكن حذف آخر مدير في النظام" : "You cannot delete the last admin",
+    delUser:      isAr ? "حذف المستخدم" : "Delete user",
+    confirmDel:   isAr ? "هل أنت متأكد من حذف هذا المستخدم؟" : "Are you sure you want to delete this user?",
+    addUserOk:    isAr ? "تم إضافة المستخدم بنجاح" : "User added successfully",
+    updUserOk:    isAr ? "تم تحديث بيانات المستخدم" : "User updated",
+    delUserOk:    isAr ? "تم حذف المستخدم" : "User deleted",
+    editUser:     isAr ? "تعديل مستخدم" : "Edit user",
+    addUserNew:   isAr ? "إضافة مستخدم جديد" : "Add new user",
+    pwd:          isAr ? "كلمة المرور" : "Password",
+    pwdEdit:      isAr ? "كلمة مرور جديدة (اتركها فارغة لعدم التغيير)" : "New password (leave blank to keep current)",
+    pickRole:     isAr ? "اختر الدور" : "Select role",
+    save:         isAr ? "تحديث" : "Update",
+    add:          isAr ? "إضافة" : "Add",
+    // Imports
+    impMembers:   isAr ? "استيراد بيانات الأعضاء" : "Import members",
+    impMembersD:  isAr ? "رفع ملف Excel يحتوي على بيانات الأعضاء لإضافتهم دفعةً واحدة." : "Upload an Excel file with member data to add them in bulk.",
+    steps:        isAr ? "الخطوات:" : "Steps:",
+    step1:        isAr ? "حمّل نموذج Excel الرسمي بالضغط على الزر أدناه." : "Download the official Excel template using the button below.",
+    step2:        isAr ? "أدخل بيانات الأعضاء في الملف (الاسم الأول والكنية إلزاميان، باقي الحقول اختيارية)." : "Fill in the member data (first and last name are required, the rest are optional).",
+    step3:        isAr ? "ارفع الملف المعبّأ لبدء الاستيراد التلقائي." : "Upload the completed file to start the automatic import.",
+    dlTemplate:   isAr ? "تحميل نموذج Excel" : "Download Excel template",
+    importing:    isAr ? "جارٍ الاستيراد..." : "Importing...",
+    uploadFile:   isAr ? "رفع ملف الاستيراد" : "Upload import file",
+    updExisting:  isAr ? "تحديث بيانات الأعضاء الموجودين" : "Update existing members",
+    updExHelp:    isAr ? "عند تفعيله، يُحدِّث بيانات أي عضو يتطابق اسمه (الأول + الكنية) بدلاً من تجاهله." : "When enabled, updates any member whose name (first + last) matches instead of skipping it.",
+    importRes:    isAr ? "نتائج الاستيراد" : "Import results",
+    succeeded:    isAr ? "تمّ بنجاح:" : "Succeeded:",
+    failed:       isAr ? "فشل:" : "Failed:",
+    updated:      isAr ? "تمّ التحديث:" : "Updated:",
+    skipped:      isAr ? "تمّ تجاهل (موجود مسبقاً):" : "Skipped (already exists):",
+    emptyFile:    isAr ? "الملف فارغ" : "Empty file",
+    noData:       isAr ? "لا توجد بيانات في الملف." : "No data found in the file.",
+    readErr:      isAr ? "خطأ في قراءة الملف" : "Failed to read file",
+    importDone:   isAr ? "اكتمل الاستيراد" : "Import complete",
+    addedN:       isAr ? "أُضيف" : "Added",
+    updatedN:     isAr ? "حُدِّث" : "Updated",
+    failedN:      isAr ? "فشل" : "Failed",
+    sep:          isAr ? "، " : ", ",
+    tplDl:        isAr ? "تم تحميل النموذج" : "Template downloaded",
+    tplDlD:       isAr ? "يمكنك الآن ملء البيانات واستيرادها." : "You can now fill in the data and import it.",
+    impSubs:      isAr ? "استيراد الاشتراكات السنوية" : "Import annual subscriptions",
+    impSubsD:     isAr ? "رفع ملف Excel يحتوي على اشتراكات الأعضاء وربطها تلقائياً بسجلاتهم." : "Upload an Excel file with member payments to link them to their records.",
+    matchTitle:   isAr ? "طريقة المطابقة مع الأعضاء:" : "Matching method:",
+    matchById:    isAr ? "الأدق والأسرع (موصى به)" : "Most accurate and fastest (recommended)",
+    matchByName:  isAr ? "بديل تلقائي" : "Automatic fallback",
+    membershipNo: isAr ? "رقم العضوية" : "Membership number",
+    nameCombo:    isAr ? "الاسم الأول + الكنية" : "First name + last name",
+    requiredCols: isAr ? "الحقول المطلوبة في الملف:" : "Required fields in the file:",
+    fNoOrName:    isAr ? "رقم العضوية أو الاسم" : "Membership number or name",
+    fNoOrNameD:   isAr ? "للمطابقة" : "for matching",
+    fYear:        isAr ? "سنة الاشتراك" : "Subscription year",
+    fYearD:       isAr ? "مثل 2024" : "e.g. 2024",
+    fAmount:      isAr ? "المبلغ" : "Amount",
+    fAmountD:     isAr ? "رقم صحيح" : "integer",
+    fDate:        isAr ? "تاريخ الدفع" : "Payment date",
+    fDateD:       "YYYY-MM-DD",
+    dlSubTpl:     isAr ? "تحميل نموذج الاشتراكات" : "Download subscriptions template",
+    uploadSub:    isAr ? "رفع ملف الاشتراكات" : "Upload subscriptions file",
+    updSubExist:  isAr ? "تحديث الاشتراكات الموجودة" : "Update existing subscriptions",
+    updSubHelp:   isAr ? "عند تفعيله، يُحدِّث المبلغ والتاريخ والملاحظات لأي اشتراك موجود لنفس العضو ونفس السنة بدلاً من تجاهله." : "When enabled, updates amount, date and notes for any existing payment for the same member and year instead of skipping.",
+    subResults:   isAr ? "نتائج استيراد الاشتراكات" : "Subscriptions import results",
+    subTplDl:     isAr ? "تم تحميل نموذج الاشتراكات" : "Subscriptions template downloaded",
+    subImpDone:   isAr ? "اكتمل استيراد الاشتراكات" : "Subscriptions import complete",
+    expSubs:      isAr ? "تصدير الاشتراكات" : "Export subscriptions",
+    expSubsD:     isAr ? "تصدير جميع اشتراكات الأعضاء في ملف Excel قابل لإعادة الاستيراد." : "Export all member subscriptions to an Excel file that can be re-imported.",
+    expSubsBtn:   isAr ? "تصدير Excel للاشتراكات" : "Export subscriptions Excel",
+    expSubsOk:    isAr ? "تم تصدير الاشتراكات" : "Subscriptions exported",
+    expSubsOkD:   isAr ? "تم تحميل ملف الاشتراكات بنجاح." : "Subscriptions file downloaded successfully.",
+    expSubsErr:   isAr ? "خطأ في تصدير الاشتراكات" : "Subscriptions export failed",
+    expSubsEmpty: isAr ? "لا توجد اشتراكات للتصدير" : "No subscriptions to export",
+    expMembers:   isAr ? "تصدير الأعضاء" : "Export members",
+    expMembersD:  isAr ? "تصدير قائمة الأعضاء في ملف Excel قابل لإعادة الاستيراد." : "Export the members list to an Excel file that can be re-imported.",
+    expMembersBtn:isAr ? "تصدير Excel للأعضاء" : "Export members Excel",
+    expMembersOk: isAr ? "تم تصدير الأعضاء" : "Members exported",
+    expMembersOkD:isAr ? "تم تحميل ملف الأعضاء بنجاح." : "Members file downloaded successfully.",
+    expMembersErr:isAr ? "خطأ في التصدير" : "Export failed",
+    exporting:    isAr ? "جارٍ التصدير..." : "Exporting...",
+    backupTitle:  isAr ? "النسخ الاحتياطي" : "Backup",
+    backupDesc:   isAr ? "تصدير نسخة احتياطية كاملة لجميع بيانات النظام (الأعضاء، الاشتراكات، المستخدمين)." : "Export a full backup of all system data (members, subscriptions, users).",
+    backupIncl:   isAr ? "تشمل النسخة الاحتياطية:" : "The backup includes:",
+    backupAllM:   isAr ? "بيانات جميع الأعضاء" : "All member data",
+    backupAllS:   isAr ? "سجلّات الاشتراكات السنوية" : "Annual subscription records",
+    backupUsers:  isAr ? "قائمة المستخدمين (بدون كلمات المرور)" : "User list (without passwords)",
+    backupNote:   isAr ? "يُحفظ الملف بصيغة JSON ويمكن الاستفادة منه للأرشفة أو استعادة البيانات مستقبلاً." : "The file is saved as JSON and can be used for archiving or future restore.",
+    exportBackup: isAr ? "تصدير نسخة احتياطية" : "Export backup",
+    exportOk:     isAr ? "تم التصدير" : "Export complete",
+    exportOkD:    isAr ? "تم تحميل النسخة الاحتياطية بنجاح." : "Backup downloaded successfully.",
+    exportErr:    isAr ? "خطأ في التصدير" : "Export failed",
+    // Activity Log
+    logTitle:     isAr ? "سجل أحداث النظام" : "System Activity Log",
+    logDesc:      isAr ? "سجل تفصيلي بجميع العمليات التي تمّت على النظام." : "A detailed record of all operations performed on the system.",
+    logSearch:    isAr ? "بحث في السجل..." : "Search log...",
+    logTime:      isAr ? "الوقت" : "Time",
+    logUser:      isAr ? "المستخدم" : "User",
+    logAction:    isAr ? "الإجراء" : "Action",
+    logDetails:   isAr ? "التفاصيل" : "Details",
+    logEmpty:     isAr ? "لا توجد أحداث مسجّلة." : "No activity recorded yet.",
+    logClear:     isAr ? "مسح السجل" : "Clear log",
+    logConfirmClear: isAr ? "هل أنت متأكد من حذف جميع سجلات الأحداث؟ لا يمكن التراجع عن هذا الإجراء." : "Are you sure you want to clear all activity logs? This cannot be undone.",
+    logCopy:      isAr ? "نسخ" : "Copy",
+    logExport:    isAr ? "تصدير Excel" : "Export Excel",
+    logCleared:   isAr ? "تم مسح السجل" : "Log cleared",
+    logCopied:    isAr ? "تم نسخ السجل" : "Log copied",
+    logEntries:   isAr ? "سطر" : "entries",
+    // Access denied
+    notAllowed:   isAr ? "غير مسموح بالدخول" : "Access denied",
+    notAllowedD:  isAr ? "عذراً، صفحة الإعدادات متاحة للمدراء فقط." : "Sorry, the settings page is available to admins only.",
+  };
+
+  // ─── State ────────────────────────────────────────────────────────────────────
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [memberUpdateExisting, setMemberUpdateExisting] = useState(false);
+  const [subUpdateExisting, setSubUpdateExisting] = useState(false);
+  const [subImportResult, setSubImportResult] = useState<ImportResult | null>(null);
+  const [isSubImporting, setIsSubImporting] = useState(false);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [isExportingMembers, setIsExportingMembers] = useState(false);
+  const [isExportingSubs, setIsExportingSubs] = useState(false);
+  const [logFilter, setLogFilter] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const subFileInputRef = useRef<HTMLInputElement>(null);
+
+  const userFormSchema = buildUserSchema(isAr);
+
+  // ─── Queries ──────────────────────────────────────────────────────────────────
+  const { data: users, isLoading } = useQuery<User[]>({ queryKey: ["/api/users"] });
+  const { data: currentUser } = useQuery<User>({ queryKey: ["/api/user"] });
+  const { data: activityLogs = [], isLoading: isLogsLoading } = useQuery<ActivityLog[]>({
+    queryKey: ["/api/activity-log"],
+    staleTime: 0,
+  });
+
+  const adminCount = (users ?? []).filter((u) => u.role === "admin").length;
+
+  // ─── Mutations ────────────────────────────────────────────────────────────────
+  const onMutationError = (err: Error) => {
+    toast({ title: L.error, description: err.message, variant: "destructive" });
+  };
+
+  const createUserMutation = useMutation({
+    mutationFn: async (data: UserFormValues) => {
+      const res = await apiRequest("POST", "/api/users", data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      toast({ title: L.success, description: L.addUserOk });
+      setIsDialogOpen(false);
+    },
+    onError: onMutationError,
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: Partial<UserFormValues> }) => {
+      const res = await apiRequest("PATCH", `/api/users/${id}`, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      toast({ title: L.success, description: L.updUserOk });
+      setIsDialogOpen(false);
+    },
+    onError: onMutationError,
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: async (id: string) => { await apiRequest("DELETE", `/api/users/${id}`); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      toast({ title: L.success, description: L.delUserOk });
+    },
+    onError: onMutationError,
+  });
+
+  const clearLogsMutation = useMutation({
+    mutationFn: async () => { await apiRequest("DELETE", "/api/activity-log"); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/activity-log"] });
+      toast({ title: L.logCleared });
+    },
+    onError: onMutationError,
+  });
+
+  // ─── Form ─────────────────────────────────────────────────────────────────────
+  const form = useForm<UserFormValues>({
+    resolver: zodResolver(userFormSchema),
+    defaultValues: { username: "", password: "", role: "employee" },
+  });
+
+  const onSubmit = (data: UserFormValues) => {
+    if (editingUser) {
+      const updates = { ...data };
+      if (!updates.password) delete updates.password;
+      updateUserMutation.mutate({ id: editingUser.id, data: updates });
+    } else {
+      createUserMutation.mutate(data);
+    }
+  };
+
+  const startEdit = (user: User) => {
+    setEditingUser(user);
+    form.reset({ username: user.username, password: "", role: user.role as "admin" | "employee" });
+    setIsDialogOpen(true);
+  };
+
+  const startAdd = () => {
+    setEditingUser(null);
+    form.reset({ username: "", password: "", role: "employee" });
+    setIsDialogOpen(true);
+  };
+
+  // ─── Excel template download ──────────────────────────────────────────────────
+  const downloadTemplate = () => {
+    const headers = IMPORT_COLUMNS.map((c) => (isAr ? c.labelAr : c.labelEn));
+    const example = IMPORT_COLUMNS.map((c) => (isAr ? c.exampleAr : c.exampleEn));
+    const notes = IMPORT_COLUMNS.map((c) => {
+      if (c.key === "gender") return isAr ? "القيم: male أو female" : "Values: male or female";
+      if (c.key === "membershipType") return isAr ? "القيم: original أو associate" : "Values: original or associate";
+      if (c.key === "specialty") return isAr ? "القيم: cardiology أو cardiac_surgery" : "Values: cardiology or cardiac_surgery";
+      if (c.key === "birthDate" || c.key === "joinDate") return isAr ? "الصيغة: YYYY-MM-DD" : "Format: YYYY-MM-DD";
+      return "";
+    });
+    const ws = XLSX.utils.aoa_to_sheet([headers, example, notes]);
+    ws["!cols"] = headers.map(() => ({ wch: 22 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, isAr ? "نموذج الاستيراد" : "Import template");
+    XLSX.writeFile(wb, isAr ? "نموذج-استيراد-الاعضاء.xlsx" : "members-import-template.xlsx");
+    toast({ title: L.tplDl, description: L.tplDlD });
+  };
+
+  // ─── Members file import ──────────────────────────────────────────────────────
+  const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportResult(null);
+    setIsImporting(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rawRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (rawRows.length < 2) { toast({ title: L.emptyFile, description: L.noData, variant: "destructive" }); setIsImporting(false); return; }
+      const headerRow = rawRows[0] as string[];
+      const dataRows = rawRows.slice(1).filter((r) => r.some((c) => c !== undefined && c !== ""));
+      const colIndexMap = buildHeaderIndex(headerRow, IMPORT_COLUMNS);
+      const members = dataRows.map((row) => {
+        const obj: Record<string, string> = {};
+        IMPORT_COLUMNS.forEach((col) => {
+          const idx = colIndexMap[col.key];
+          if (idx !== undefined && row[idx] !== undefined && row[idx] !== "") obj[col.key] = String(row[idx]).trim();
+        });
+        return obj;
+      });
+      const res = await apiRequest("POST", "/api/members/import", { rows: members, updateExisting: memberUpdateExisting });
+      const result: ImportResult = await res.json();
+      setImportResult(result);
+      queryClient.invalidateQueries({ queryKey: ["/api/members"] });
+      if (result.success > 0 || (result.updated ?? 0) > 0) {
+        const parts: string[] = [];
+        if (result.success > 0) parts.push(`${L.addedN} ${result.success}`);
+        if ((result.updated ?? 0) > 0) parts.push(`${L.updatedN} ${result.updated}`);
+        if (result.failed > 0) parts.push(`${L.failedN} ${result.failed}`);
+        toast({ title: L.importDone, description: parts.join(L.sep) });
+      }
+    } catch { toast({ title: L.readErr, variant: "destructive" }); }
+    finally { setIsImporting(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
+  };
+
+  // ─── Subscriptions template download ─────────────────────────────────────────
+  const downloadSubTemplate = () => {
+    const headers = SUB_IMPORT_COLUMNS.map((c) => (isAr ? c.labelAr : c.labelEn));
+    const example = SUB_IMPORT_COLUMNS.map((c) => (isAr ? c.exampleAr : c.exampleEn));
+    const notes = SUB_IMPORT_COLUMNS.map((c) => {
+      if (c.key === "year") return isAr ? "رقم السنة الميلادية مثل 2024" : "Gregorian year, e.g. 2024";
+      if (c.key === "amount") return isAr ? "رقم صحيح بالليرة السورية" : "Integer in Syrian Pounds";
+      if (c.key === "date") return isAr ? "الصيغة: YYYY-MM-DD" : "Format: YYYY-MM-DD";
+      if (c.key === "membershipNumber") return isAr ? "مُفضَّل للمطابقة الدقيقة" : "Preferred for exact matching";
+      if (c.key === "firstName" || c.key === "lastName") return isAr ? "بديل عند غياب رقم العضوية" : "Used as fallback if membership number is missing";
+      return "";
+    });
+    const ws = XLSX.utils.aoa_to_sheet([headers, example, notes]);
+    ws["!cols"] = [{ wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 22 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, isAr ? "نموذج الاشتراكات" : "Subscriptions template");
+    XLSX.writeFile(wb, isAr ? "نموذج-استيراد-الاشتراكات.xlsx" : "subscriptions-import-template.xlsx");
+    toast({ title: L.subTplDl });
+  };
+
+  // ─── Subscriptions file import ────────────────────────────────────────────────
+  const handleSubFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSubImportResult(null);
+    setIsSubImporting(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rawRows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      if (rawRows.length < 2) { toast({ title: L.emptyFile, variant: "destructive" }); setIsSubImporting(false); return; }
+      const headerRow = rawRows[0] as string[];
+      const dataRows = rawRows.slice(1).filter((r) => r.some((c) => c !== undefined && c !== ""));
+      const colIndexMap = buildHeaderIndex(headerRow, SUB_IMPORT_COLUMNS);
+      const rows = dataRows.map((row) => {
+        const obj: Record<string, any> = {};
+        SUB_IMPORT_COLUMNS.forEach((col) => {
+          const idx = colIndexMap[col.key];
+          if (idx !== undefined && row[idx] !== undefined && row[idx] !== "") {
+            obj[col.key] = col.key === "year" || col.key === "amount" ? Number(row[idx]) : String(row[idx]).trim();
+          }
+        });
+        return obj;
+      });
+      const res = await apiRequest("POST", "/api/subscriptions/import", { rows, updateExisting: subUpdateExisting });
+      const result: ImportResult = await res.json();
+      setSubImportResult(result);
+      queryClient.invalidateQueries({ queryKey: ["/api/members"] });
+      if (result.success > 0 || (result.updated ?? 0) > 0) {
+        const parts: string[] = [];
+        if (result.success > 0) parts.push(`${L.addedN} ${result.success}`);
+        if ((result.updated ?? 0) > 0) parts.push(`${L.updatedN} ${result.updated}`);
+        if (result.failed > 0) parts.push(`${L.failedN} ${result.failed}`);
+        toast({ title: L.subImpDone, description: parts.join(L.sep) });
+      }
+    } catch { toast({ title: L.readErr, variant: "destructive" }); }
+    finally { setIsSubImporting(false); if (subFileInputRef.current) subFileInputRef.current.value = ""; }
+  };
+
+  // ─── Members Excel export ─────────────────────────────────────────────────────
+  const handleExportMembers = async () => {
+    setIsExportingMembers(true);
+    try {
+      const res = await apiRequest("GET", "/api/members");
+      const members: Record<string, unknown>[] = await res.json();
+      if (!members.length) { toast({ title: L.expMembersOk, description: L.expSubsEmpty }); return; }
+      const colDefs = IMPORT_COLUMNS.map((c) => ({ key: c.key, label: (isAr ? c.labelAr : c.labelEn).replace(" *", "") }));
+      const data = members.map((m) => {
+        const row: Record<string, unknown> = {};
+        for (const { key, label } of colDefs) row[label] = m[key] ?? "";
+        return row;
+      });
+      const ws = XLSX.utils.json_to_sheet(data);
+      ws["!cols"] = colDefs.map(() => ({ wch: 22 }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, isAr ? "الأعضاء" : "Members");
+      XLSX.writeFile(wb, isAr ? "اعضاء-SCVA.xlsx" : "SCVA-Members.xlsx");
+      toast({ title: L.expMembersOk, description: L.expMembersOkD });
+    } catch { toast({ title: L.expMembersErr, variant: "destructive" }); }
+    finally { setIsExportingMembers(false); }
+  };
+
+  // ─── Subscriptions Excel export ───────────────────────────────────────────────
+  const handleExportSubs = async () => {
+    setIsExportingSubs(true);
+    try {
+      const res = await apiRequest("GET", "/api/subscriptions/export");
+      const rows: Record<string, unknown>[] = await res.json();
+      if (!rows.length) { toast({ title: L.expSubsOk, description: L.expSubsEmpty }); return; }
+      const colDefs = SUB_IMPORT_COLUMNS.map((c) => ({ key: c.key, label: (isAr ? c.labelAr : c.labelEn).replace(" *", "") }));
+      const data = rows.map((r) => {
+        const row: Record<string, unknown> = {};
+        for (const { key, label } of colDefs) row[label] = r[key] ?? "";
+        return row;
+      });
+      const ws = XLSX.utils.json_to_sheet(data);
+      ws["!cols"] = colDefs.map(() => ({ wch: 22 }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, isAr ? "الاشتراكات" : "Subscriptions");
+      XLSX.writeFile(wb, isAr ? "اشتراكات-SCVA.xlsx" : "SCVA-Subscriptions.xlsx");
+      toast({ title: L.expSubsOk, description: L.expSubsOkD });
+    } catch { toast({ title: L.expSubsErr, variant: "destructive" }); }
+    finally { setIsExportingSubs(false); }
+  };
+
+  // ─── Backup ───────────────────────────────────────────────────────────────────
+  const handleBackup = async () => {
+    setIsBackingUp(true);
+    try {
+      const res = await apiRequest("GET", "/api/backup");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `scva-backup-${new Date().toISOString().split("T")[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: L.exportOk, description: L.exportOkD });
+    } catch { toast({ title: L.exportErr, variant: "destructive" }); }
+    finally { setIsBackingUp(false); }
+  };
+
+  // ─── Activity log helpers ─────────────────────────────────────────────────────
+  const filteredLogs = activityLogs.filter((log) => {
+    if (!logFilter) return true;
+    const q = logFilter.toLowerCase();
+    const label = isAr ? getActionLabel(log.action).ar : getActionLabel(log.action).en;
+    return (
+      log.username.toLowerCase().includes(q) ||
+      label.toLowerCase().includes(q) ||
+      (log.details ?? "").toLowerCase().includes(q) ||
+      log.timestamp.includes(q)
+    );
+  });
+
+  const handleCopyLog = async () => {
+    if (!filteredLogs.length) return;
+    const text = filteredLogs.map((log) =>
+      `${formatTimestamp(log.timestamp)} | ${log.username} | ${getActionLabel(log.action)[isAr ? "ar" : "en"]} | ${log.details ?? ""}`
+    ).join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast({ title: L.logCopied });
+    } catch { toast({ title: L.error, variant: "destructive" }); }
+  };
+
+  const handleExportLog = () => {
+    if (!filteredLogs.length) return;
+    const data = filteredLogs.map((log) => ({
+      [L.logTime]: formatTimestamp(log.timestamp),
+      [L.logUser]: log.username,
+      [L.logAction]: getActionLabel(log.action)[isAr ? "ar" : "en"],
+      [L.logDetails]: log.details ?? "",
+      IP: log.ip ?? "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws["!cols"] = [{ wch: 20 }, { wch: 16 }, { wch: 22 }, { wch: 40 }, { wch: 16 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, isAr ? "سجل الأحداث" : "Activity Log");
+    XLSX.writeFile(wb, `scva-activity-log-${new Date().toISOString().split("T")[0]}.xlsx`);
+  };
+
+  // ─── Guards ───────────────────────────────────────────────────────────────────
+  if (isLoading) return <Loader2 className="h-8 w-8 animate-spin mx-auto mt-20" />;
+
+  if (currentUser?.role !== "admin") {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4 text-center">
+        <div className="h-20 w-20 rounded-full bg-destructive/10 flex items-center justify-center">
+          <ShieldCheck className="h-10 w-10 text-destructive" />
+        </div>
+        <h2 className="text-2xl font-bold">{L.notAllowed}</h2>
+        <p className="text-muted-foreground max-w-sm">{L.notAllowedD}</p>
+      </div>
+    );
+  }
+
+  // ─── Render ───────────────────────────────────────────────────────────────────
+  const ImportResultPanel = ({ result, onClose, title }: { result: ImportResult; onClose: () => void; title: string }) => (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="font-semibold text-sm">{title}</p>
+        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}><X className="h-3.5 w-3.5" /></Button>
+      </div>
+      <div className="flex flex-wrap gap-4">
+        <div className="flex items-center gap-2 text-sm text-emerald-600">
+          <CheckCircle2 className="h-4 w-4" />
+          <span>{L.succeeded} <strong>{result.success}</strong></span>
+        </div>
+        {result.failed > 0 && (
+          <div className="flex items-center gap-2 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4" />
+            <span>{L.failed} <strong>{result.failed}</strong></span>
+          </div>
+        )}
+        {(result.updated ?? 0) > 0 && (
+          <div className="flex items-center gap-2 text-sm text-blue-600">
+            <CheckCircle2 className="h-4 w-4" />
+            <span>{L.updated} <strong>{result.updated}</strong></span>
+          </div>
+        )}
+        {(result.skipped ?? 0) > 0 && (
+          <div className="flex items-center gap-2 text-sm text-amber-600">
+            <AlertCircle className="h-4 w-4" />
+            <span>{L.skipped} <strong>{result.skipped}</strong></span>
+          </div>
+        )}
+      </div>
+      {result.errors.length > 0 && (
+        <div className="rounded-md bg-destructive/5 border border-destructive/20 p-3 space-y-1 max-h-40 overflow-y-auto">
+          {result.errors.map((e, i) => <p key={i} className="text-xs text-destructive font-mono">{e}</p>)}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-6 max-w-5xl mx-auto">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">{L.title}</h1>
+        <p className="text-muted-foreground mt-1">{L.subtitle}</p>
+      </div>
+
+      <Tabs defaultValue="users" className="space-y-6" data-testid="settings-tabs">
+        <TabsList className="w-full sm:w-auto">
+          <TabsTrigger value="users" data-testid="tab-users">{L.tabUsers}</TabsTrigger>
+          <TabsTrigger value="data"  data-testid="tab-data">{L.tabData}</TabsTrigger>
+          <TabsTrigger value="log"   data-testid="tab-log">
+            <History className="h-3.5 w-3.5 me-1.5" aria-hidden="true" />
+            {L.tabLog}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ============================= USERS TAB ============================= */}
+        <TabsContent value="users">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between gap-4 pb-4">
+              <div>
+                <CardTitle className="text-lg">{L.usersTitle}</CardTitle>
+                <CardDescription>{L.usersDesc}</CardDescription>
+              </div>
+              <Button onClick={startAdd} size="sm">
+                <UserPlus className="ms-2 h-4 w-4" />
+                {L.addUser}
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="rounded-b-lg overflow-hidden border-t">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40">
+                      <TableHead className={`${isAr ? "text-right" : "text-left"} font-semibold`}>{L.username}</TableHead>
+                      <TableHead className={`${isAr ? "text-right" : "text-left"} font-semibold`}>{L.role}</TableHead>
+                      <TableHead className={`${isAr ? "text-left" : "text-right"} font-semibold w-24`}>{L.actions}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {users?.map((user) => {
+                      const isSelf = currentUser?.id === user.id;
+                      const isLastAdmin = user.role === "admin" && adminCount <= 1;
+                      const cannotDelete = isSelf || isLastAdmin;
+                      const deleteTitle = isSelf ? L.cantDelSelf : isLastAdmin ? L.cantDelLast : L.delUser;
+                      return (
+                        <TableRow key={user.id} data-testid={`row-user-${user.id}`}>
+                          <TableCell className="font-medium">{user.username}</TableCell>
+                          <TableCell>
+                            <Badge variant={user.role === "admin" ? "default" : "secondary"}>
+                              {user.role === "admin" ? L.admin : L.employee}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className={isAr ? "text-left" : "text-right"}>
+                            <div className={`flex gap-1 ${isAr ? "justify-end" : "justify-start"}`}>
+                              <Button
+                                variant="ghost" size="icon" className="h-8 w-8"
+                                onClick={() => startEdit(user)} data-testid={`button-edit-user-${user.id}`}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                variant="ghost" size="icon" disabled={cannotDelete} title={deleteTitle} aria-label={deleteTitle}
+                                className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-auto"
+                                onClick={() => { if (cannotDelete) return; if (confirm(L.confirmDel)) deleteUserMutation.mutate(user.id); }}
+                                data-testid={`button-delete-user-${user.id}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ============================= DATA TAB ============================== */}
+        <TabsContent value="data" className="space-y-6">
+          {/* Members Import */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center ring-1 ring-primary/20">
+                  <FileSpreadsheet className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">{L.impMembers}</CardTitle>
+                  <CardDescription>{L.impMembersD}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                <p className="text-sm font-medium">{L.steps}</p>
+                <ol className="text-sm text-muted-foreground space-y-1.5 list-decimal list-inside">
+                  <li>{L.step1}</li><li>{L.step2}</li><li>{L.step3}</li>
+                </ol>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Button variant="outline" onClick={downloadTemplate} className="gap-2">
+                  <Download className="h-4 w-4" />{L.dlTemplate}
+                </Button>
+                <div className="relative">
+                  <Button variant="default" onClick={() => fileInputRef.current?.click()} disabled={isImporting} className="gap-2">
+                    {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {isImporting ? L.importing : L.uploadFile}
+                  </Button>
+                  <input ref={fileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileImport} />
+                </div>
+              </div>
+              <label className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 cursor-pointer">
+                <Checkbox id="member-update-existing" checked={memberUpdateExisting} onCheckedChange={(c) => setMemberUpdateExisting(c === true)} data-testid="checkbox-member-update-existing" className="mt-0.5" />
+                <div className="space-y-0.5 text-sm">
+                  <span className="font-medium">{L.updExisting}</span>
+                  <p className="text-xs text-muted-foreground">{L.updExHelp}</p>
+                </div>
+              </label>
+              {importResult && <ImportResultPanel result={importResult} onClose={() => setImportResult(null)} title={L.importRes} />}
+            </CardContent>
+          </Card>
+
+          {/* Subscriptions Import */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center ring-1 ring-primary/20">
+                  <Receipt className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">{L.impSubs}</CardTitle>
+                  <CardDescription>{L.impSubsD}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                <p className="text-sm font-medium">{L.matchTitle}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-muted-foreground">
+                  <div className="flex items-start gap-2">
+                    <span className="text-primary font-bold mt-0.5">①</span>
+                    <span><strong>{L.membershipNo}</strong> — {L.matchById}</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="text-primary font-bold mt-0.5">②</span>
+                    <span><strong>{L.nameCombo}</strong> — {L.matchByName}</span>
+                  </div>
+                </div>
+                <div className="border-t pt-3">
+                  <p className="text-sm font-medium mb-1.5">{L.requiredCols}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { label: L.fNoOrName, note: L.fNoOrNameD },
+                      { label: L.fYear, note: L.fYearD },
+                      { label: L.fAmount, note: L.fAmountD },
+                      { label: L.fDate, note: L.fDateD },
+                    ].map((f) => (
+                      <span key={f.label} className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs">
+                        <strong>{f.label}</strong>
+                        <span className="text-muted-foreground">({f.note})</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <Button variant="outline" onClick={downloadSubTemplate} className="gap-2">
+                  <Download className="h-4 w-4" />{L.dlSubTpl}
+                </Button>
+                <div className="relative">
+                  <Button variant="default" onClick={() => subFileInputRef.current?.click()} disabled={isSubImporting} className="gap-2">
+                    {isSubImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                    {isSubImporting ? L.importing : L.uploadSub}
+                  </Button>
+                  <input ref={subFileInputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleSubFileImport} />
+                </div>
+              </div>
+              <label className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 cursor-pointer">
+                <Checkbox id="sub-update-existing" checked={subUpdateExisting} onCheckedChange={(c) => setSubUpdateExisting(c === true)} data-testid="checkbox-sub-update-existing" className="mt-0.5" />
+                <div className="space-y-0.5 text-sm">
+                  <span className="font-medium">{L.updSubExist}</span>
+                  <p className="text-xs text-muted-foreground">{L.updSubHelp}</p>
+                </div>
+              </label>
+              {subImportResult && <ImportResultPanel result={subImportResult} onClose={() => setSubImportResult(null)} title={L.subResults} />}
+            </CardContent>
+          </Card>
+
+          {/* Members Export */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center ring-1 ring-primary/20">
+                  <FileSpreadsheet className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">{L.expMembers}</CardTitle>
+                  <CardDescription>{L.expMembersD}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={handleExportMembers} disabled={isExportingMembers} variant="outline" className="gap-2" data-testid="button-export-members">
+                {isExportingMembers ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {isExportingMembers ? L.exporting : L.expMembersBtn}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Subscriptions Export */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center ring-1 ring-primary/20">
+                  <Receipt className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">{L.expSubs}</CardTitle>
+                  <CardDescription>{L.expSubsD}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={handleExportSubs} disabled={isExportingSubs} variant="outline" className="gap-2" data-testid="button-export-subscriptions">
+                {isExportingSubs ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {isExportingSubs ? L.exporting : L.expSubsBtn}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Backup */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center ring-1 ring-primary/20">
+                  <DatabaseBackup className="h-4 w-4" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">{L.backupTitle}</CardTitle>
+                  <CardDescription>{L.backupDesc}</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground space-y-1.5">
+                <p>{L.backupIncl}</p>
+                <ul className="list-disc list-inside space-y-1">
+                  <li>{L.backupAllM}</li>
+                  <li>{L.backupAllS}</li>
+                  <li>{L.backupUsers}</li>
+                </ul>
+                <p className="pt-1 text-xs">{L.backupNote}</p>
+              </div>
+              <Button onClick={handleBackup} disabled={isBackingUp} variant="outline" className="gap-2">
+                {isBackingUp ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {isBackingUp ? L.exporting : L.exportBackup}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ========================= ACTIVITY LOG TAB ========================= */}
+        <TabsContent value="log">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center ring-1 ring-primary/20">
+                    <History className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg">{L.logTitle}</CardTitle>
+                    <CardDescription>{L.logDesc}</CardDescription>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline" size="sm" className="gap-1.5"
+                    onClick={handleCopyLog} disabled={!filteredLogs.length}
+                    data-testid="button-copy-log"
+                  >
+                    <Copy className="h-3.5 w-3.5" />{L.logCopy}
+                  </Button>
+                  <Button
+                    variant="outline" size="sm" className="gap-1.5"
+                    onClick={handleExportLog} disabled={!filteredLogs.length}
+                    data-testid="button-export-log"
+                  >
+                    <Download className="h-3.5 w-3.5" />{L.logExport}
+                  </Button>
+                  <Button
+                    variant="outline" size="sm"
+                    className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => { if (window.confirm(L.logConfirmClear)) clearLogsMutation.mutate(); }}
+                    disabled={!activityLogs.length || clearLogsMutation.isPending}
+                    data-testid="button-clear-log"
+                  >
+                    {clearLogsMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    {L.logClear}
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Input
+                placeholder={L.logSearch}
+                value={logFilter}
+                onChange={(e) => setLogFilter(e.target.value)}
+                className="max-w-sm"
+                data-testid="input-log-search"
+              />
+              <div className="rounded-lg border overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/40">
+                      <TableHead className="font-semibold whitespace-nowrap">{L.logTime}</TableHead>
+                      <TableHead className="font-semibold">{L.logUser}</TableHead>
+                      <TableHead className="font-semibold">{L.logAction}</TableHead>
+                      <TableHead className="font-semibold">{L.logDetails}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLogsLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center py-8">
+                          <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredLogs.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={4} className="text-center py-8 text-muted-foreground text-sm">
+                          {L.logEmpty}
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredLogs.map((log) => {
+                      const lbl = getActionLabel(log.action);
+                      return (
+                        <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
+                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap font-mono">
+                            {formatTimestamp(log.timestamp)}
+                          </TableCell>
+                          <TableCell className="font-medium text-sm">{log.username}</TableCell>
+                          <TableCell>
+                            <span className={cn("text-sm font-medium", lbl.color)}>
+                              {isAr ? lbl.ar : lbl.en}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground max-w-xs truncate" title={log.details ?? undefined}>
+                            {log.details}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+              {filteredLogs.length > 0 && (
+                <p className="text-xs text-muted-foreground text-end">
+                  {filteredLogs.length} {L.logEntries}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* ===== User Dialog ===== */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingUser ? L.editUser : L.addUserNew}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
+            <div className="space-y-2">
+              <Label>{L.username}</Label>
+              <Input {...form.register("username")} />
+              {form.formState.errors.username && (
+                <p className="text-sm text-destructive">{form.formState.errors.username.message}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>{editingUser ? L.pwdEdit : L.pwd}</Label>
+              <Input type="password" {...form.register("password")} />
+              {form.formState.errors.password && (
+                <p className="text-sm text-destructive">{form.formState.errors.password.message}</p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>{L.role}</Label>
+              <Select defaultValue={form.getValues("role")} onValueChange={(val: any) => form.setValue("role", val)}>
+                <SelectTrigger>
+                  <SelectValue placeholder={L.pickRole} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">{L.admin}</SelectItem>
+                  <SelectItem value="employee">{L.employee}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button type="submit" className="w-full" disabled={createUserMutation.isPending || updateUserMutation.isPending}>
+              {(createUserMutation.isPending || updateUserMutation.isPending) && (
+                <Loader2 className="ms-2 h-4 w-4 animate-spin" />
+              )}
+              {editingUser ? L.save : L.add}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
