@@ -635,21 +635,21 @@ exit /b 0
 set /a TOTAL+=1
 set /a PASS+=1
 echo   [PASS]  %~1  --  %~2
-echo [PASS]  %~1  |  %~2 >> "%REPORT%"
+echo [PASS]  %~1 -- %~2 >> "%REPORT%"
 goto :eof
 
 :warn
 set /a TOTAL+=1
 set /a WARN+=1
 echo   [WARN]  %~1  --  %~2
-echo [WARN]  %~1  |  %~2 >> "%REPORT%"
+echo [WARN]  %~1 -- %~2 >> "%REPORT%"
 goto :eof
 
 :bad
 set /a TOTAL+=1
 set /a FAIL+=1
 echo   [FAIL]  %~1  --  %~2
-echo [FAIL]  %~1  |  %~2 >> "%REPORT%"
+echo [FAIL]  %~1 -- %~2 >> "%REPORT%"
 goto :eof
 
 :log_info
