@@ -17,7 +17,7 @@ chcp 65001 > nul 2>&1
 ::  (إلا ملف التقرير SCVA-Diagnostics-Report.txt)
 :: ================================================================
 
-set "TOOL_VERSION=1.3.0"
+set "TOOL_VERSION=1.4.0"
 set "APP_PORT=43210"
 
 :: App directory = folder containing this .bat file

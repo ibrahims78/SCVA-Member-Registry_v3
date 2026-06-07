@@ -11,7 +11,7 @@ app.setName('SCVA Members');
 // ─── Configuration ────────────────────────────────────────────────────────────
 const SERVER_PORT = 43210;
 const APP_TITLE   = 'نظام إدارة أعضاء SCVA';
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 const MIN_WIDTH   = 1024;
 const MIN_HEIGHT  = 700;
 
