@@ -7,7 +7,7 @@ const { session } = require('electron');
 // ─── Configuration ────────────────────────────────────────────────────────────
 const SERVER_PORT = 43210;
 const APP_TITLE   = 'نظام إدارة أعضاء SCVA';
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 const MIN_WIDTH   = 1024;
 const MIN_HEIGHT  = 700;
 
@@ -170,29 +170,66 @@ app.on('window-all-closed', () => {
 });
 
 // ─── Robust final persist before exit ────────────────────────────────────────
-// This runs synchronously before Electron terminates so no in-memory data is lost.
+// Tries two strategies to flush the SQLite database to disk before quitting:
+//   1. Re-require the db module (Node returns the cached instance with live state)
+//   2. Walk ALL cached modules and find any that expose a persist() function
+// This guards against subtle asar path-key mismatches.
 app.on('before-quit', () => {
+  let persisted = false;
+
+  // Strategy 1: direct path require (returns cached module if already loaded)
   try {
-    // The db module is already in Node's require cache because server.js imported
-    // it during startup. Re-requiring it returns the cached module with the live
-    // _sqlDb and _dbPath variables intact.
-    const dbModule = require(path.join(__dirname, '../dist/server/db.js'));
+    const dbPath = path.join(__dirname, '../dist/server/db.js');
+    const dbModule = require(dbPath);
+    if (typeof dbModule.closePersistInterval === 'function') dbModule.closePersistInterval();
     if (typeof dbModule.persist === 'function') {
-      dbModule.closePersistInterval();  // stop the interval first
-      dbModule.persist();               // final synchronous flush
-      console.log('[SCVA] Final database persist on quit complete.');
+      dbModule.persist();
+      persisted = true;
+      console.log('[SCVA] Final database persist on quit complete (strategy 1).');
     }
   } catch (err) {
-    // Non-fatal — every write already called persist() individually
-    console.warn('[SCVA] before-quit persist skipped:', err && err.message);
+    console.warn('[SCVA] before-quit strategy 1 failed:', err && err.message);
+  }
+
+  // Strategy 2: scan require cache for any module that has persist()
+  if (!persisted) {
+    try {
+      for (const key of Object.keys(require.cache)) {
+        if (key.includes('dist') && key.includes('db')) {
+          const mod = require.cache[key] && require.cache[key].exports;
+          if (mod && typeof mod.persist === 'function') {
+            if (typeof mod.closePersistInterval === 'function') mod.closePersistInterval();
+            mod.persist();
+            persisted = true;
+            console.log('[SCVA] Final database persist on quit complete (strategy 2 via cache scan).');
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[SCVA] before-quit strategy 2 failed:', err && err.message);
+    }
+  }
+
+  if (!persisted) {
+    console.warn('[SCVA] before-quit: could not locate db module — data was already persisted per-write.');
   }
 });
 
 // Also handle SIGTERM / SIGINT (e.g. task manager force-close on Windows)
-process.on('SIGTERM', () => {
-  try {
-    const dbModule = require(path.join(__dirname, '../dist/server/db.js'));
-    if (typeof dbModule.persist === 'function') dbModule.persist();
-  } catch {}
-  process.exit(0);
+['SIGTERM', 'SIGINT'].forEach((sig) => {
+  process.on(sig, () => {
+    try {
+      for (const key of Object.keys(require.cache)) {
+        if (key.includes('dist') && key.includes('db')) {
+          const mod = require.cache[key] && require.cache[key].exports;
+          if (mod && typeof mod.persist === 'function') {
+            mod.persist();
+            break;
+          }
+        }
+      }
+    } catch {}
+    process.exit(0);
+  });
 });

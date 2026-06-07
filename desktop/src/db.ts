@@ -123,11 +123,11 @@ export async function initDatabase(dbPath: string): Promise<void> {
   persist();
   console.log("[DB] Database initialized and persisted to:", dbPath);
 
-  // Auto-save every 15 seconds as safety net
+  // Auto-save every 5 seconds as safety net (was 15s — shorter window reduces data loss on crash)
   if (_persistInterval) clearInterval(_persistInterval);
   _persistInterval = setInterval(() => {
     persist();
-  }, 15 * 1000);
+  }, 5 * 1000);
   if (typeof _persistInterval.unref === "function") _persistInterval.unref();
 }
 
@@ -141,13 +141,37 @@ export function persist(): void {
   try {
     const data = _sqlDb.export();
     const buf = Buffer.from(data);
-    // Write to a temp file first, then rename — atomic on most OSes
     const tmp = _dbPath + ".tmp";
+
+    // Write to temp file first
     fs.writeFileSync(tmp, buf);
-    fs.renameSync(tmp, _dbPath);
+
+    // Try atomic rename; on Windows this can fail with EPERM/EACCES when
+    // the destination file is held open by antivirus or another handle.
+    // In that case fall back to a direct overwrite of the target.
+    try {
+      fs.renameSync(tmp, _dbPath);
+    } catch {
+      // Fall back: write directly, then clean up the temp file
+      try {
+        fs.writeFileSync(_dbPath, buf);
+      } finally {
+        try { fs.unlinkSync(tmp); } catch {}
+      }
+    }
+
     console.log(`[DB] Persisted ${buf.length} bytes → ${_dbPath}`);
   } catch (err) {
     console.error("[DB] Failed to persist database:", err);
+    // Last resort: attempt a direct write without any temp file
+    try {
+      if (_sqlDb && _dbPath) {
+        fs.writeFileSync(_dbPath, Buffer.from(_sqlDb.export()));
+        console.log("[DB] Fallback direct persist succeeded");
+      }
+    } catch (fallbackErr) {
+      console.error("[DB] Fallback persist also failed:", fallbackErr);
+    }
   }
 }
 
