@@ -8,12 +8,12 @@
 ### موقع قاعدة البيانات الرئيسية
 
 ```
-C:\Users\[اسم المستخدم]\AppData\Roaming\SCVA Members\scva-members.db
+C:\Users\[اسم المستخدم]\AppData\Roaming\scva-members-desktop\scva-members.db
 ```
 
 **مثال على مستخدم اسمه Ahmad:**
 ```
-C:\Users\Ahmad\AppData\Roaming\SCVA Members\scva-members.db
+C:\Users\Ahmad\AppData\Roaming\scva-members-desktop\scva-members.db
 ```
 
 > **ملاحظة:** مجلد `AppData` مخفيٌّ افتراضياً في Windows.  
@@ -22,7 +22,7 @@ C:\Users\Ahmad\AppData\Roaming\SCVA Members\scva-members.db
 ### الوصول السريع
 افتح موجه الأوامر (CMD) وأدخل:
 ```
-explorer %APPDATA%\SCVA Members
+explorer %APPDATA%\scva-members-desktop
 ```
 سيفتح المجلد مباشرةً في File Explorer.
 
@@ -103,7 +103,7 @@ SQLite هي قاعدة بيانات **مضمَّنة داخل التطبيق** �
 
 ```cmd
 :: نقل قاعدة البيانات القديمة إلى مكان آخر (للحفاظ عليها)
-move "%APPDATA%\SCVA Members\scva-members.db" "%USERPROFILE%\Desktop\scva-members-backup.db"
+move "%APPDATA%\scva-members-desktop\scva-members.db" "%USERPROFILE%\Desktop\scva-members-backup.db"
 
 :: ثم شغّل التطبيق من جديد
 ```
@@ -184,7 +184,7 @@ cd "SCVA Members-win32-x64"
 
 افتح ملف `scva-members.db` من المسار:
 ```
-C:\Users\[اسم المستخدم]\AppData\Roaming\SCVA Members\scva-members.db
+C:\Users\[اسم المستخدم]\AppData\Roaming\scva-members-desktop\scva-members.db
 ```
 
 ### أوامر SQL مفيدة (عبر DB Browser أو sqlite3.exe)
@@ -249,14 +249,14 @@ SELECT name FROM sqlite_master WHERE type='table';
 
 ```cmd
 :: إذا كان لديك sqlite3.exe (يمكن تحميله من https://sqlite.org/download.html)
-sqlite3 "%APPDATA%\SCVA Members\scva-members.db" .dump > scva-full-export.sql
+sqlite3 "%APPDATA%\scva-members-desktop\scva-members.db" .dump > scva-full-export.sql
 ```
 
 ### إنشاء نسخة احتياطية يدوية
 
 ```cmd
 :: نسخ ملف قاعدة البيانات مباشرةً
-copy "%APPDATA%\SCVA Members\scva-members.db" "%USERPROFILE%\Desktop\scva-backup-%date:~-4,4%%date:~-7,2%%date:~-10,2%.db"
+copy "%APPDATA%\scva-members-desktop\scva-members.db" "%USERPROFILE%\Desktop\scva-backup-%date:~-4,4%%date:~-7,2%%date:~-10,2%.db"
 ```
 
 ---
@@ -370,7 +370,7 @@ curl -b cookies.txt -X POST http://127.0.0.1:43210/api/reset \
 
 أو انسخ الملف يدوياً:
 ```cmd
-copy "%APPDATA%\SCVA Members\scva-members.db" "D:\Backup\scva-backup.db"
+copy "%APPDATA%\scva-members-desktop\scva-members.db" "D:\Backup\scva-backup.db"
 ```
 
 ---
@@ -383,14 +383,14 @@ copy "%APPDATA%\SCVA Members\scva-members.db" "D:\Backup\scva-backup.db"
 
 **على الجهاز القديم — انسخ الملف:**
 ```
-C:\Users\[اسم_قديم]\AppData\Roaming\SCVA Members\scva-members.db
+C:\Users\[اسم_قديم]\AppData\Roaming\scva-members-desktop\scva-members.db
 ```
 
 **على الجهاز الجديد — ضع الملف في:**
 ```
-C:\Users\[اسم_جديد]\AppData\Roaming\SCVA Members\scva-members.db
+C:\Users\[اسم_جديد]\AppData\Roaming\scva-members-desktop\scva-members.db
 ```
-> إذا لم يكن مجلد `SCVA Members` موجوداً، أنشئه يدوياً.
+> إذا لم يكن مجلد `scva-members-desktop` موجوداً، أنشئه يدوياً.
 
 ثم شغّل التطبيق — سيجد الملف ويحمّل كل البيانات مباشرةً.
 
@@ -428,7 +428,7 @@ mkdir "D:\SCVA-Data"
 
 **2. انقل الملف الموجود إلى المسار الجديد:**
 ```cmd
-move "%APPDATA%\SCVA Members\scva-members.db" "D:\SCVA-Data\scva-members.db"
+move "%APPDATA%\scva-members-desktop\scva-members.db" "D:\SCVA-Data\scva-members.db"
 ```
 
 **3. اضبط متغير البيئة على مستوى النظام كله**
@@ -480,33 +480,71 @@ reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /
 
 ## 📁 الفرق بين مجلد التطبيق ومجلد البيانات
 
-هناك **مجلدان مستقلان تماماً** يجب معرفتهما:
+هناك **مجلدان مختلفان** يجب معرفة الفرق بينهما جيداً:
 
 ```
 📁 المجلد الأول: مجلد التطبيق (البرنامج نفسه)
-   SCVA Members-win32-x64\
-   ├── SCVA Members.exe           ← الملف التنفيذي
+   SCVA Members-win32-x64\            ← أنت من اختار مكانه عند فك الضغط
+   ├── SCVA Members.exe               ← الملف التنفيذي
    ├── resources\
-   │   ├── app.asar               ← كود البرنامج
-   │   └── app.asar.unpacked\     ← ملفات WASM
+   │   ├── app.asar                   ← كود البرنامج
+   │   └── app.asar.unpacked\         ← ملفات WASM
    └── ...
 
-📁 المجلد الثاني: مجلد البيانات (يُنشأ تلقائياً)
-   C:\Users\[اسم المستخدم]\AppData\Roaming\SCVA Members\
-   └── scva-members.db            ← قاعدة البيانات فقط
+📁 المجلد الثاني: مجلد البيانات (يُنشأ تلقائياً من Windows)
+   C:\Users\[اسم المستخدم]\AppData\Roaming\scva-members-desktop\
+   └── scva-members.db                ← قاعدة البيانات
 ```
 
-> هذان المجلدان **مستقلان تماماً** — حذف أحدهما لا يؤثر على الآخر.
+> **القاعدة الأساسية:**  
+> مجلد التطبيق = **البرنامج** | مجلد البيانات = **المعلومات**  
+> يمكنك حذف/نقل أي منهما بشكل مستقل.
 
 ---
 
-## 🗑️ ماذا يحدث إذا حذفت مجلد التطبيق؟
+## 🗑️ ماذا يحدث إذا حذفت مجلد البيانات `scva-members-desktop`؟
+
+هذا هو **أخطر** سيناريو لأن المجلد يحتوي على قاعدة البيانات نفسها.
+
+| النتيجة | التفاصيل |
+|---|---|
+| ❌ **كل البيانات تُفقَد نهائياً** | جميع بيانات الأعضاء، الاشتراكات، السجل، المستخدمين |
+| ✅ التطبيق يعمل | لكن يبدأ من صفر تماماً |
+| 🔄 يُنشئ مجلداً جديداً فارغاً | نفس المسار، لكن قاعدة بيانات فارغة |
+| 🔄 يُنشئ admin جديداً | بكلمة مرور عشوائية جديدة تظهر في CMD |
+
+> ⚠️ **لا يوجد سلة محذوفات لقواعد البيانات** — الحذف نهائي لا عودة منه.
+
+### ماذا تفعل إذا أردت التخلص من المجلد بأمان؟
+
+```cmd
+:: انقله بدلاً من حذفه (يحافظ على إمكانية الاسترجاع)
+move "%APPDATA%\scva-members-desktop" "D:\SCVA-Backup-Folder"
+```
+
+---
+
+## 🗑️ ماذا يحدث إذا حذفت مجلد التطبيق `SCVA Members-win32-x64`؟
 
 | النتيجة | التفاصيل |
 |---|---|
 | ❌ التطبيق لا يعمل | لا يوجد .exe بعد الحذف |
-| ✅ البيانات سليمة 100% | scva-members.db في AppData لم يُمَس |
-| ✅ الحل سهل | أعد فك ضغط الـ tar.gz مرة أخرى وسيعود كل شيء |
+| ✅ **البيانات سليمة 100%** | مجلد `scva-members-desktop` في AppData لم يُمَس |
+| ✅ الحل سهل | أعد فك ضغط الـ tar.gz مرة أخرى — ستجد كل بياناتك |
+
+---
+
+## 📦 نقل مجلد البيانات `scva-members-desktop` إلى D: — هل يعمل؟
+
+**لا. هذا لن يعمل.**
+
+السبب: التطبيق مُبرمَج للبحث عن البيانات دائماً في:
+```
+C:\Users\[المستخدم الحالي]\AppData\Roaming\scva-members-desktop\
+```
+حتى لو نقلت المجلد إلى D:، **سيُنشئ التطبيق مجلداً جديداً فارغاً في AppData عند التشغيل** ويتجاهل المجلد الذي نقلته.
+
+**الحل الصحيح الوحيد** لتغيير مكان البيانات هو متغير البيئة `SQLITE_DB_PATH` (راجع قسم "تغيير موقع قاعدة البيانات" أعلاه).
 
 ---
 
@@ -514,7 +552,7 @@ reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /
 
 **هما شيئان مختلفان تماماً ولكل منهما هدف مختلف.**
 
-### نقل مجلد التطبيق إلى D:
+### نقل مجلد التطبيق `SCVA Members-win32-x64` إلى D:
 ```
 من: C:\Users\Ahmad\Desktop\SCVA Members-win32-x64\
 إلى: D:\SCVA Members-win32-x64\
@@ -526,7 +564,7 @@ reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /
 
 ### نقل ملف قاعدة البيانات إلى D: (عبر SQLITE_DB_PATH)
 ```
-من: C:\Users\[كل مستخدم]\AppData\Roaming\SCVA Members\scva-members.db
+من: C:\Users\[كل مستخدم]\AppData\Roaming\scva-members-desktop\scva-members.db
 إلى: D:\SCVA-Data\scva-members.db  ← مشترك لجميع المستخدمين
 ```
 - ✅ **يؤثر على:** مصدر البيانات لجميع المستخدمين
@@ -535,10 +573,10 @@ reg delete "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment" /
 ### الإعداد المثالي (الجمع بين الاثنين)
 
 ```
-D:\SCVA Members-win32-x64\     ← البرنامج على D:
+D:\SCVA Members-win32-x64\        ← البرنامج على D:
     └── SCVA Members.exe
 
-D:\SCVA-Data\                  ← البيانات على D: (مشتركة للجميع)
+D:\SCVA-Data\                     ← البيانات على D: (مشتركة للجميع)
     └── scva-members.db
 
 متغير البيئة (System-wide):
@@ -562,7 +600,7 @@ D:\SCVA-Data\                  ← البيانات على D: (مشتركة لل
 
 | المعلومة | القيمة |
 |---|---|
-| مسار البيانات | `%APPDATA%\SCVA Members\scva-members.db` |
+| مسار البيانات | `%APPDATA%\scva-members-desktop\scva-members.db` |
 | منفذ الخادم الداخلي | `43210` |
 | اسم المدير الافتراضي | `admin` |
 | تنسيق ملف النسخ الاحتياطي | JSON |

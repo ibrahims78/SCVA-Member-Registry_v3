@@ -81,7 +81,11 @@ global.generateElectronPDF = async function(memberId, cookieString, lang) {
 // ─── Start Express server ─────────────────────────────────────────────────────
 function startServer() {
   const userDataPath = app.getPath('userData');
-  process.env.SQLITE_DB_PATH = path.join(userDataPath, 'scva-members.db');
+  // Respect an existing SQLITE_DB_PATH (e.g. set via setx /M for shared installs).
+  // Only fall back to the per-user AppData path when no override is configured.
+  if (!process.env.SQLITE_DB_PATH) {
+    process.env.SQLITE_DB_PATH = path.join(userDataPath, 'scva-members.db');
+  }
   process.env.PORT = String(SERVER_PORT);
   process.env.NODE_ENV = 'production';
 
