@@ -15,7 +15,7 @@ chcp 65001 > nul 2>&1
 ::  READ-ONLY - does not modify any files except SCVA-Diagnostics-Report.txt
 :: ================================================================
 
-set "TOOL_VERSION=1.5.0"
+set "TOOL_VERSION=1.6.0"
 set "APP_PORT=43210"
 
 set "APP_DIR=%~dp0"

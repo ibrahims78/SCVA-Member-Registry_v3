@@ -129,7 +129,12 @@ export const queryClient = new QueryClient({
       // during a single user interaction. Mutations always invalidate
       // their target keys explicitly.
       staleTime: 30_000,
-      retry: false,
+      // Retry up to 3 times on transient failures (e.g. server still warming
+      // up at app launch, antivirus briefly intercepting HTTP on the local
+      // port). Without retries the members list stays empty until a mutation
+      // forces a manual invalidation/refetch.
+      retry: 3,
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
     },
     mutations: {
       retry: false,
