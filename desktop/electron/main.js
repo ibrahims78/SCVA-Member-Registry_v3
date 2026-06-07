@@ -4,6 +4,10 @@ const { app, BrowserWindow, Menu, shell } = require('electron');
 const path = require('path');
 const { session } = require('electron');
 
+// Set app name explicitly so app.getPath('userData') always resolves to
+// C:\Users\<user>\AppData\Roaming\SCVA Members  (matches the displayed Data Dir)
+app.setName('SCVA Members');
+
 // ─── Configuration ────────────────────────────────────────────────────────────
 const SERVER_PORT = 43210;
 const APP_TITLE   = 'نظام إدارة أعضاء SCVA';

@@ -85,10 +85,21 @@ const packagerCmd = packagerBin + ' . "SCVA Members"'
 
 run(packagerCmd);
 
+const releaseDir = path.join(outDir, 'SCVA Members-win32-x64');
+
+// ── Copy SCVA-Diagnostics.bat into the release folder ─────────────────────
+{
+  const batSrc  = path.join(DESKTOP, 'SCVA-Diagnostics.bat');
+  const batDest = path.join(releaseDir, 'SCVA-Diagnostics.bat');
+  if (fs.existsSync(batSrc) && fs.existsSync(releaseDir)) {
+    fs.copyFileSync(batSrc, batDest);
+    console.log(`✓ SCVA-Diagnostics.bat copied to release folder`);
+  }
+}
+
 // ── Guarantee WASM is in app.asar.unpacked ────────────────────────────────
 // --asar-unpack should handle this, but we copy manually as a hard guarantee.
 // Without sql-wasm.wasm on disk (outside the asar), the database engine fails.
-const releaseDir = path.join(outDir, 'SCVA Members-win32-x64');
 {
   const wasmSrc  = path.join(DESKTOP, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
   const wasmDest = path.join(releaseDir, 'resources', 'app.asar.unpacked', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
