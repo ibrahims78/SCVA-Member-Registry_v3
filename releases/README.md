@@ -11,11 +11,8 @@
 
 | الملف | الوصف | الحجم |
 |---|---|---|
-| `SCVA-Members-v1.0.0-Windows-x64.tar.gz` | أرشيف الإصدار 1.0.0 | ~111 MB |
-| `SCVA-Members-v1.1.0-Windows-x64.tar.gz` | أرشيف الإصدار 1.1.0 | ~111 MB |
+| `SCVA-Members-v1.2.0-Windows-x64.tar.gz` | أرشيف الإصدار 1.2.0 (أحدث) | ~111 MB |
 | `README.md` | هذا الملف |  |
-
-> **ملاحظة:** لبناء الإصدار 1.2.0 على Windows شغّل `desktop\build-windows.bat` (انظر قسم إعادة البناء أدناه).
 
 ---
 
