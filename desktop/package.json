@@ -1,6 +1,6 @@
 {
   "name": "scva-members-desktop",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "نظام إدارة أعضاء الرابطة السورية لأمراض وجراحة القلب - تطبيق سطح المكتب",
   "main": "electron/main.js",
   "author": "SCVA",
