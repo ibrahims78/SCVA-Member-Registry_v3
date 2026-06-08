@@ -77,7 +77,12 @@ export default function Login() {
     setLoading(true);
     try {
       await apiRequest("POST", "/api/login", { username, password });
-      await queryClient.invalidateQueries({ queryKey: ["/api/user"] });
+      // Invalidate ALL queries after login, not just /api/user.
+      // MembersProvider fires GET /api/members before the user is authenticated
+      // and the query enters a permanent error state. Without a full invalidation
+      // here, /api/members stays broken until something else (like an import
+      // mutation) forces a manual refetch.
+      await queryClient.invalidateQueries();
       setLocation("/");
     } catch (error: unknown) {
       const message =
