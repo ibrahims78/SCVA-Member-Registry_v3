@@ -559,7 +559,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allSubscriptions = Array.from(subsMap.values()).flat();
       const users = await storage.getUsers();
       const backup = {
-        version: "1.1",
+        version: "1.7",
         exportedAt: new Date().toISOString(),
         data: {
           members,

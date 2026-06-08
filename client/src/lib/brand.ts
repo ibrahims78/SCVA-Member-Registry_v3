@@ -3,7 +3,7 @@
  * Single source of truth for brand naming and copy.
  */
 
-export const APP_VERSION = "1.1.0";
+export const APP_VERSION = "1.7.0";
 
 export const DESIGNER = {
   nameAr: "إبراهيم الصيداوي",

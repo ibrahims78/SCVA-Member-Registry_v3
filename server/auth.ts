@@ -37,7 +37,7 @@ export async function setupAuth(app: Express) {
   const sessionSettings: session.SessionOptions = {
     secret:
       sessionSecret ||
-      Math.random().toString(36).slice(2) + Date.now().toString(36),
+      require("crypto").randomBytes(32).toString("hex"),
     resave: false,
     saveUninitialized: false,
     cookie: {
